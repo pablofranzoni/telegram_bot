@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subir Archivo CSV</title>
+    <!-- Archivos estáticos desde /static/ -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Estilos básicos si no quieres CSS externo */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #ddd;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        
+        input[type="file"]:hover {
+            border-color: #4CAF50;
+        }
+        
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .progress {
+            height: 100%;
+            background-color: #4CAF50;
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        
+        #message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            display: none;
+        }
+        
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .requirements {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .requirements h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📤 Subir Archivo CSV</h1>
+        
+        <div class="requirements">
+            <h3>📋 Requisitos del archivo:</h3>
+            <ul>
+                <li>Formato: <strong>.csv</strong> (Comma Separated Values)</li>
+                <li>Encoding recomendado: <strong>UTF-8</strong></li>
+                <li>Tamaño máximo: <strong>50MB</strong></li>
+                <li>Delimitador: <strong>coma (,)</strong> o punto y coma (;)</li>
+                <li>Columnas requeridas: <code>customer_id</code>, <code>email</code></li>
+                <li>Primera fila: debe contener los nombres de las columnas</li>
+            </ul>
+        </div>
+        
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file">Seleccionar archivo CSV:</label>
+                <input type="file" id="file" name="file" accept=".csv" required>
+                <small>Formatos aceptados: .csv</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="description">Descripción (opcional):</label>
+                <textarea id="description" name="description" rows="3" 
+                          placeholder="Ejemplo: Clientes de Enero 2024, actualización mensual..."></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="delimiter">Delimitador del CSV:</label>
+                <select id="delimiter" name="delimiter">
+                    <option value=",">Coma (,)</option>
+                    <option value=";">Punto y coma (;)</option>
+                    <option value="\t">Tabulador</option>
+                    <option value="auto">Auto-detectar</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="has_headers" name="has_headers" checked>
+                    El archivo tiene encabezados en la primera fila
+                </label>
+            </div>
+            
+            <div class="progress-bar" id="progressContainer">
+                <div class="progress" id="progressBar"></div>
+            </div>
+            
+            <button type="submit" id="submitBtn">Subir Archivo</button>
+        </form>
+        
+        <div id="message"></div>
+        
+        <div id="preview" style="display: none; margin-top: 30px;">
+            <h3>📄 Vista previa (primeras 5 filas):</h3>
+            <table id="previewTable" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background-color: #f2f2f2;">
+                        <!-- Las cabeceras se llenarán con JavaScript -->
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Las filas se llenarán con JavaScript -->
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;">
+            <h3>📊 Acciones adicionales:</h3>
+            <p>
+                <a href="{{ url_for('csv.list_uploads') }}" style="margin-right: 15px;">
+                    📁 Ver archivos subidos
+                </a>
+                <a href="{{ url_for('csv.list_customers') }}" style="margin-right: 15px;">
+                    👥 Ver clientes
+                </a>
+                <a href="{{ url_for('csv.get_stats') }}">
+                    📈 Ver estadísticas
+                </a>
+            </p>
+        </div>
+    </div>
+
+    <!-- JavaScript para manejar el formulario -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('uploadForm');
+            const fileInput = document.getElementById('file');
+            const submitBtn = document.getElementById('submitBtn');
+            const messageDiv = document.getElementById('message');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const previewDiv = document.getElementById('preview');
+            const previewTable = document.getElementById('previewTable');
+            
+            // Vista previa del archivo
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    previewCsvFile(file);
+                }
+            });
+            
+            // Enviar formulario
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                const file = fileInput.files[0];
+                if (!file) {
+                    showMessage('Por favor selecciona un archivo', 'error');
+                    return;
+                }
+                
+                // Validar extensión
+                if (!file.name.toLowerCase().endsWith('.csv')) {
+                    showMessage('Solo se permiten archivos CSV (.csv)', 'error');
+                    return;
+                }
+                
+                // Validar tamaño (50MB)
+                if (file.size > 50 * 1024 * 1024) {
+                    showMessage('El archivo es demasiado grande (máximo 50MB)', 'error');
+                    return;
+                }
+                
+                // Preparar formulario
+                const formData = new FormData(form);
+                
+                // Mostrar progreso
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Subiendo...';
+                progressContainer.style.display = 'block';
+                progressBar.style.width = '0%';
+                
+                try {
+                    // Simular progreso
+                    const progressInterval = setInterval(() => {
+                        const currentWidth = parseInt(progressBar.style.width) || 0;
+                        if (currentWidth < 90) {
+                            progressBar.style.width = (currentWidth + 10) + '%';
+                        }
+                    }, 300);
+                    
+                    // Enviar a Flask
+                    const response = await fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    clearInterval(progressInterval);
+                    progressBar.style.width = '100%';
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        showMessage(
+                            `✅ ${result.message}<br>
+                             📊 Registros procesados: ${result.processed_rows}<br>
+                             🔗 ID de upload: ${result.upload_id}`,
+                            'success'
+                        );
+                        
+                        // Resetear formulario después de 3 segundos
+                        setTimeout(() => {
+                            form.reset();
+                            progressContainer.style.display = 'none';
+                            submitBtn.disabled = false;
+                            submitBtn.textContent = 'Subir Archivo';
+                            previewDiv.style.display = 'none';
+                        }, 3000);
+                        
+                    } else {
+                        showMessage(`❌ Error: ${result.error}`, 'error');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Subir Archivo';
+                    }
+                    
+                } catch (error) {
+                    showMessage(`❌ Error de conexión: ${error.message}`, 'error');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Subir Archivo';
+                    progressContainer.style.display = 'none';
+                }
+            });
+            
+            function showMessage(text, type) {
+                messageDiv.innerHTML = text;
+                messageDiv.className = type;
+                messageDiv.style.display = 'block';
+                
+                // Auto-ocultar después de 10 segundos para errores
+                if (type === 'error' || type === 'success') {
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                    }, 10000);
+                }
+            }
+            
+            function previewCsvFile(file) {
+                if (!file) return;
+                
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    const content = e.target.result;
+                    const lines = content.split('\n').slice(0, 6); // Primeras 6 líneas
+                    
+                    // Detectar delimitador
+                    const delimiter = detectDelimiter(lines[0]);
+                    
+                    // Parsear CSV
+                    const rows = lines.map(line => {
+                        if (delimiter === ',') {
+                            // Manejar comas dentro de comillas
+                            return line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || [];
+                        } else {
+                            return line.split(delimiter);
+                        }
+                    });
+                    
+                    // Mostrar vista previa
+                    if (rows.length > 1) {
+                        const headers = rows[0];
+                        const dataRows = rows.slice(1, 6); // Máximo 5 filas de datos
+                        
+                        // Limpiar tabla
+                        previewTable.innerHTML = '';
+                        
+                        // Crear cabeceras
+                        const thead = document.createElement('thead');
+                        const headerRow = document.createElement('tr');
+                        
+                        headers.forEach(header => {
+                            const th = document.createElement('th');
+                            th.textContent = header.trim().replace(/"/g, '');
+                            th.style.padding = '8px';
+                            th.style.border = '1px solid #ddd';
+                            headerRow.appendChild(th);
+                        });
+                        
+                        thead.appendChild(headerRow);
+                        previewTable.appendChild(thead);
+                        
+                        // Crear cuerpo
+                        const tbody = document.createElement('tbody');
+                        
+                        dataRows.forEach(row => {
+                            const tr = document.createElement('tr');
+                            
+                            row.forEach(cell => {
+                                const td = document.createElement('td');
+                                td.textContent = cell.trim().replace(/"/g, '');
+                                td.style.padding = '8px';
+                                td.style.border = '1px solid #ddd';
+                                tr.appendChild(td);
+                            });
+                            
+                            tbody.appendChild(tr);
+                        });
+                        
+                        previewTable.appendChild(tbody);
+                        previewDiv.style.display = 'block';
+                        
+                        // Actualizar selector de delimitador
+                        const delimiterSelect = document.getElementById('delimiter');
+                        if (delimiter === ',') {
+                            delimiterSelect.value = ',';
+                        } else if (delimiter === ';') {
+                            delimiterSelect.value = ';';
+                        } else if (delimiter === '\t') {
+                            delimiterSelect.value = '\t';
+                        }
+                    }
+                };
+                
+                reader.readAsText(file);
+            }
+            
+            function detectDelimiter(firstLine) {
+                const delimiters = [',', ';', '\t', '|'];
+                let maxCount = 0;
+                let detectedDelimiter = ',';
+                
+                delimiters.forEach(delimiter => {
+                    const count = (firstLine.match(new RegExp(`\\${delimiter}`, 'g')) || []).length;
+                    if (count > maxCount) {
+                        maxCount = count;
+                        detectedDelimiter = delimiter;
+                    }
+                });
+                
+                return detectedDelimiter;
+            }
+        });
+    </script>
+</body>
+</html>
