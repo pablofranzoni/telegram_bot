@@ -24,6 +24,8 @@ def init_database():
         CREATE TABLE IF NOT EXISTS clientes (
             telegram_id INTEGER PRIMARY KEY,
             nombre TEXT NOT NULL,
+            apellido TEXT,
+            username TEXT,
             telefono TEXT,
             direccion TEXT,
             saldo REAL DEFAULT 0.0

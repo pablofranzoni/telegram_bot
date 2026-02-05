@@ -5,14 +5,14 @@ from database.db import get_db
 def get_categorias():
     try:
         db = get_db()
-        categorias = db.execute("""
-                    SELECT categorias.descripcion FROM categorias 
-                    INNER JOIN productos ON categorias.id = productos.categoria_id 
-                            WHERE productos.disponible = 1 
-                            GROUP BY categorias.descripcion 
-                            ORDER BY categorias.descripcion
+        categories = db.execute("""
+                    SELECT categories.descripcion FROM categories 
+                    INNER JOIN products ON categories.id = products.category_id 
+                            WHERE products.disponible = 1 
+                            GROUP BY categories.descripcion 
+                            ORDER BY categories.descripcion
                 """, fetchall=True)
-        return [row[0] for row in categorias]
+        return [row[0] for row in categories]
         
     except sqlite3.Error as e:
         print(f"Error al obtener categorías: {e}")
@@ -21,254 +21,291 @@ def get_categorias():
 def get_productos_por_categoria(categoria):
     """Obtiene productos de una categoría específica"""
     try:
-         with sqlite3.connect('pedidos_bot.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT productos.id, productos.nombre, productos.descripcion, productos.precio 
-                FROM productos 
-                INNER JOIN categorias ON productos.categoria_id = categorias.id
-                WHERE categorias.descripcion = ? AND productos.disponible = 1
+        db = get_db()
+        productos_x_cat = db.execute('''
+                SELECT products.id, products.nombre, products.descripcion, products.precio 
+                FROM products 
+                INNER JOIN categories ON products.category_id = categories.id
+                WHERE categories.descripcion = ? AND products.disponible = 1
                 ORDER BY nombre
-            ''', (categoria,))
-            productos = cursor.fetchall()
-         return productos
+            ''', (categoria,), fetchall=True)
+        productos = [ (row[0], row[1], row[2], row[3]) for row in productos_x_cat ]
+        return productos
+    
     except sqlite3.Error as e:
         print(f"Error al obtener productos por categoría: {e}")
         return []  # Retorna lista vacía en caso de error
 
 
-def get_producto_por_id(producto_id):
+def get_producto_por_id(product_id):
     """Obtiene información de un producto específico"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, nombre, descripcion, precio FROM productos WHERE id = ?', (producto_id,))
-    producto = cursor.fetchone()
-    conn.close()
-    return producto
+    try:
+        db = get_db()
+        producto = db.execute('''
+                SELECT id, nombre, descripcion, precio 
+                FROM products
+                WHERE id = ?
+            ''', (product_id,), fetchone=True)
+        return producto
+    
+    except sqlite3.Error as e:
+        print(f"Error al obtener producto por ID: {e}")
+        return None
 
 # ====================== FUNCIONES DE CLIENTES ======================
 def registrar_cliente(telegram_id, nombre, apellido, username, telefono=None, direccion=None):
     """Registra o actualiza un cliente"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO clientes (telegram_id, nombre, apellido, username, telefono, direccion)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (telegram_id, nombre, apellido, username, telefono, direccion))
-    conn.commit()
-    conn.close()
+    try:
+        db = get_db()
+        #db.execute('''
+        #    INSERT OR REPLACE INTO clientes (telegram_id, nombre, apellido, username, telefono, direccion)
+        #    VALUES (?, ?, ?, ?, ?, ?)
+        #    ''', (telegram_id, nombre, apellido, username, telefono, direccion))
+        
+        #insertar en table customers si no existe
+        db.execute('''
+            INSERT OR REPLACE INTO customers (customer_id, name, phone, address, username)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (telegram_id, f"{nombre} {apellido}", None, None, username))
+        
+    except sqlite3.Error as e:
+        print(f"Error al registrar cliente: {e}")
+
 
 def get_cliente(telegram_id):
     """Obtiene información de un cliente"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM clientes WHERE telegram_id = ?', (telegram_id,))
-    cliente = cursor.fetchone()
-    conn.close()
-    return cliente
+    try:
+        db = get_db()
+        cliente = db.execute('SELECT * FROM customers WHERE customer_id = ?', 
+                             (telegram_id,), fetchone=True)
+        return cliente
+    
+    except sqlite3.Error as e:
+        print(f"Error al obtener cliente: {e}")
+        return None
+
 
 # ====================== FUNCIONES DE PEDIDOS ======================
-def crear_pedido(cliente_id):
+def crear_pedido(customer_id):
     """Crea un nuevo pedido y devuelve su ID"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('INSERT INTO pedidos (cliente_id) VALUES (?)', (cliente_id,))
-    pedido_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return pedido_id
+    try:
+        db = get_db()
 
-def agregar_producto_a_pedido(pedido_id, producto_id, cantidad):
+        #obtener el id del customer dado su customer_id que es el id de telegram
+        customer = db.execute('SELECT id FROM customers WHERE customer_id = ?', (customer_id,), fetchone=True)
+        if not customer:
+            print(f"Cliente con ID {customer_id} no encontrado")
+            return None
+        customer_id = customer[0]
+
+        db.execute('INSERT INTO invoices (customer_id) VALUES (?)', (customer_id,))
+        invoice = db.execute('SELECT last_insert_rowid()', fetchone=True)
+        invoice_id = invoice[0] if invoice else None
+        return invoice_id
+    
+    except sqlite3.Error as e:
+        print(f"Error al crear Invoice: {e}")
+        return None
+
+
+def eliminar_todos_productos_de_pedido(invoice_id):
+    try:
+        db = get_db()
+        # Eliminar todos los items del pedido
+        db.execute('DELETE FROM invoice_items WHERE invoice_id = ?', (invoice_id,))
+        # Actualizar total del pedido a 0
+        db.execute('UPDATE invoices SET total = 0 WHERE id = ?', (invoice_id,))
+    except sqlite3.Error as e:
+        print(f"Error al eliminar todos los productos del pedido: {e}") 
+
+
+def agregar_producto_a_pedido(invoice_id, producto_id, cantidad):
     """Agrega un producto a un pedido"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    
-    # Obtener precio del producto
-    cursor.execute('SELECT precio FROM productos WHERE id = ?', (producto_id,))
-    resultado = cursor.fetchone()
-    if not resultado:
-        conn.close()
-        return False
-    
-    precio_unitario = resultado[0]
-    
-    # Verificar si el producto ya está en el pedido
-    cursor.execute('''
-        SELECT id, cantidad FROM pedido_items 
-        WHERE pedido_id = ? AND producto_id = ?
-    ''', (pedido_id, producto_id))
-    
-    item_existente = cursor.fetchone()
-    
-    if item_existente:
-        # Actualizar cantidad si ya existe
-        nueva_cantidad = item_existente[1] + cantidad
-        cursor.execute('''
-            UPDATE pedido_items 
-            SET cantidad = ?, precio_unitario = ?
+    try:
+        db = get_db()
+        
+        # Obtener precio del producto
+        product = db.execute('SELECT precio FROM products WHERE id = ?', 
+                              (producto_id,), fetchone=True)
+        if not product:
+            return False
+        
+        precio_unitario = product[0]
+        
+        # Verificar si el producto ya está en el pedido
+        item_existente = db.execute('''
+            SELECT id, cantidad FROM invoice_items 
+            WHERE invoice_id = ? AND product_id = ?
+        ''', (invoice_id, producto_id), fetchone=True)
+        
+        if item_existente:
+            # Actualizar cantidad si ya existe
+            nueva_cantidad = item_existente[1] + cantidad
+            db.execute('''
+                UPDATE invoice_items 
+                SET cantidad = ?, precio_unitario = ?
+                WHERE id = ?
+            ''', (nueva_cantidad, precio_unitario, item_existente[0]))
+        else:
+            # Insertar nuevo item
+            db.execute('''
+                INSERT INTO invoice_items (invoice_id, product_id, cantidad, precio_unitario)
+                VALUES (?, ?, ?, ?)
+            ''', (invoice_id, producto_id, cantidad, precio_unitario))
+        
+        # Actualizar total del pedido
+        db.execute('''
+            UPDATE invoices 
+            SET total = (
+                SELECT SUM(cantidad * precio_unitario) 
+                FROM invoice_items 
+                WHERE invoice_id = ?
+            )
             WHERE id = ?
-        ''', (nueva_cantidad, precio_unitario, item_existente[0]))
-    else:
-        # Insertar nuevo item
-        cursor.execute('''
-            INSERT INTO pedido_items (pedido_id, producto_id, cantidad, precio_unitario)
-            VALUES (?, ?, ?, ?)
-        ''', (pedido_id, producto_id, cantidad, precio_unitario))
+        ''', (invoice_id, invoice_id))
+        
+        return True
     
-    # Actualizar total del pedido
-    cursor.execute('''
-        UPDATE pedidos 
-        SET total = (
-            SELECT SUM(cantidad * precio_unitario) 
-            FROM pedido_items 
-            WHERE pedido_id = ?
-        )
-        WHERE id = ?
-    ''', (pedido_id, pedido_id))
-    
-    conn.commit()
-    conn.close()
-    return True
+    except sqlite3.Error as e:
+        print(f"Error al agregar producto a invoice: {e}")
+        return False
 
-def obtener_pedido_actual(cliente_id):
+
+def obtener_pedido_actual(customer_id):
     """Obtiene el pedido pendiente del cliente"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT p.id, p.total, COUNT(pi.id) as items
-        FROM pedidos p
-        LEFT JOIN pedido_items pi ON p.id = pi.pedido_id
-        WHERE p.cliente_id = ? AND p.estado = 'pendiente'
-        GROUP BY p.id
-        ORDER BY p.fecha DESC
-        LIMIT 1
-    ''', (cliente_id,))
-    pedido = cursor.fetchone()
-    conn.close()
-    return pedido
+    try:
+        db = get_db()
 
-def obtener_detalle_pedido(pedido_id):
-    """Obtiene el detalle completo de un pedido"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    
-    # Información del pedido
-    cursor.execute('''
-        SELECT p.id, p.fecha, p.estado, p.total, c.nombre
-        FROM pedidos p
-        JOIN clientes c ON p.cliente_id = c.telegram_id
-        WHERE p.id = ?
-    ''', (pedido_id,))
-    info_pedido = cursor.fetchone()
-    
-    # Items del pedido
-    cursor.execute('''
-        SELECT pr.id, pr.nombre, pi.cantidad, pi.precio_unitario, 
-               (pi.cantidad * pi.precio_unitario) as subtotal
-        FROM pedido_items pi
-        JOIN productos pr ON pi.producto_id = pr.id
-        WHERE pi.pedido_id = ?
-        ORDER BY pr.nombre
-    ''', (pedido_id,))
-    items = cursor.fetchall()
-    
-    conn.close()
-    return info_pedido, items
+        #obtener el id del customer dado su customer_id que es el id de telegram
+        customer = db.execute('SELECT id FROM customers WHERE customer_id = ?', (customer_id,), fetchone=True)
+        if not customer:
+            print(f"Cliente con ID {customer_id} no encontrado")
+            return None
+        customer_id = customer[0]
 
-def eliminar_producto_de_db(pedido_id, producto_id):
+        pedido = db.execute('''
+            SELECT p.id, p.total, COUNT(pi.id) as items
+            FROM invoices p
+            LEFT JOIN invoice_items pi ON p.id = pi.invoice_id
+            WHERE p.customer_id = ? AND p.estado = 'pendiente'
+            GROUP BY p.id
+            ORDER BY p.fecha DESC
+            LIMIT 1
+        ''', (customer_id,), fetchone=True)
+        return pedido
+    
+    except sqlite3.Error as e:
+        print(f"Error al obtener pedido actual: {e}")
+        return None
+
+
+def obtener_detalle_pedido(invoice_id):
+    """Obtiene el detalle completo de un invoice"""
+    try:
+        db = get_db()
+            # Información del pedido
+        info_pedido = db.execute('''
+            SELECT p.id, p.fecha, p.estado, p.total, c.name
+            FROM invoices p
+            JOIN customers c ON p.customer_id = c.id
+            WHERE p.id = ?
+        ''', (invoice_id,), fetchone=True)
+        # Items del pedido
+        items = db.execute('''
+            SELECT pr.id, pr.nombre, pi.cantidad, pi.precio_unitario, 
+                   (pi.cantidad * pi.precio_unitario) as subtotal
+            FROM invoice_items pi
+            JOIN products pr ON pi.product_id = pr.id
+            WHERE pi.invoice_id = ?
+            ORDER BY pr.nombre
+        ''', (invoice_id,), fetchall=True)
+        return info_pedido, items
+    
+    except sqlite3.Error as e:
+        print(f"Error al obtener detalle de invoice: {e}")
+        return None, []
+
+
+def eliminar_producto_de_db(invoice_id, producto_id):
     """
     Elimina un producto de la base de datos.
     Retorna True si fue exitoso, False si hubo error.
     """
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    
     try:
+        db = get_db()
         # 1. Eliminar el item
-        cursor.execute('''
-            DELETE FROM pedido_items 
-            WHERE pedido_id = ? AND producto_id = ?
-        ''', (pedido_id, producto_id))
-        
-        # 2. Actualizar total del pedido
-        cursor.execute('''
-            UPDATE pedidos 
+        db.execute('''
+            DELETE FROM invoice_items 
+            WHERE invoice_id = ? AND product_id = ?
+            ''', (invoice_id, producto_id))
+        # 2. Actualizar total del invoice
+        db.execute('''
+            UPDATE invoices 
             SET total = COALESCE((
                 SELECT SUM(cantidad * precio_unitario)
-                FROM pedido_items 
-                WHERE pedido_id = ?
+                FROM invoice_items 
+                WHERE invoice_id = ?
             ), 0)
             WHERE id = ?
-        ''', (pedido_id, pedido_id))
+            ''', (invoice_id, invoice_id))
         
-        # 3. Verificar si el pedido quedó vacío
-        cursor.execute('SELECT COUNT(*) FROM pedido_items WHERE pedido_id = ?', (pedido_id,))
-        items_restantes = cursor.fetchone()[0]
+        # 3. Verificar si el invoice quedó vacío
+        count = db.execute('SELECT COUNT(*) FROM invoice_items WHERE invoice_id = ?', 
+                           (invoice_id,),fetchone=True)
+        if count[0] == 0:
+            # Eliminar invoice vacío
+            db.execute('DELETE FROM invoices WHERE id = ?', (invoice_id,))
         
-        if items_restantes == 0:
-            # Eliminar pedido vacío
-            cursor.execute('DELETE FROM pedidos WHERE id = ?', (pedido_id,))
-        
-        conn.commit()
         return True
-        
-    except Exception as e:
+    
+    except sqlite3.Error as e:
         print(f"Error en BD al eliminar producto: {e}")
-        conn.rollback()
         return False
-        
-    finally:
-        conn.close()
 
-def actualizar_cantidad_producto(pedido_id, producto_id, nueva_cantidad):
+
+def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
     """
     Actualiza la cantidad de un producto en la base de datos.
     Retorna True si fue exitoso.
     """
     if nueva_cantidad <= 0:
-        return eliminar_producto_de_db(pedido_id, producto_id)
-    
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
+        return eliminar_producto_de_db(invoice_id, producto_id)
     
     try:
+        db = get_db()
+        
         # 1. Actualizar cantidad
-        cursor.execute('''
-            UPDATE pedido_items 
+        db.execute('''
+            UPDATE invoice_items 
             SET cantidad = ? 
-            WHERE pedido_id = ? AND producto_id = ?
-        ''', (nueva_cantidad, pedido_id, producto_id))
+            WHERE invoice_id = ? AND product_id = ?
+        ''', (nueva_cantidad, invoice_id, producto_id))
         
         # 2. Actualizar precio unitario (por si cambió)
-        cursor.execute('''
-            UPDATE pedido_items 
+        db.execute('''
+            UPDATE invoice_items 
             SET precio_unitario = (
-                SELECT precio FROM productos WHERE id = ?
+                SELECT precio FROM products WHERE id = ?
             )
-            WHERE pedido_id = ? AND producto_id = ?
-        ''', (producto_id, pedido_id, producto_id))
+            WHERE invoice_id = ? AND product_id = ?
+        ''', (producto_id, invoice_id, producto_id))
         
-        # 3. Actualizar total del pedido
-        cursor.execute('''
-            UPDATE pedidos 
+        # 3. Actualizar total del invoice
+        db.execute('''
+            UPDATE invoices 
             SET total = (
                 SELECT SUM(cantidad * precio_unitario)
-                FROM pedido_items 
-                WHERE pedido_id = ?
+                FROM invoice_items 
+                WHERE invoice_id = ?
             )
             WHERE id = ?
-        ''', (pedido_id, pedido_id))
+        ''', (invoice_id, invoice_id))
         
-        conn.commit()
         return True
-        
-    except Exception as e:
+    except sqlite3.Error as e:
         print(f"Error actualizando cantidad: {e}")
-        conn.rollback()
         return False
-        
-    finally:
-        conn.close()
+    
 
 def verificar_stock_disponible(producto_id):
     """
@@ -286,27 +323,31 @@ def verificar_stock_disponible(producto_id):
     
     return None  # Por ahora, sin límite
 
-def obtener_cantidad_producto(pedido_id, producto_id):
-    """Obtiene la cantidad actual de un producto en un pedido"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
+
+def obtener_cantidad_producto(invoice_id, producto_id):
+    """Obtiene la cantidad actual de un producto en un invoice"""
+    try:
+        db = get_db()
+        resultado = db.execute('''
+            SELECT cantidad FROM invoice_items 
+            WHERE invoice_id = ? AND product_id = ?
+        ''', (invoice_id, producto_id), fetchone=True)
+        return resultado[0] if resultado else None
     
-    cursor.execute('''
-        SELECT cantidad FROM pedido_items 
-        WHERE pedido_id = ? AND producto_id = ?
-    ''', (pedido_id, producto_id))
-    
-    resultado = cursor.fetchone()
-    conn.close()
-    
-    return resultado[0] if resultado else None
+    except sqlite3.Error as e:
+        print(f"Error al obtener cantidad de producto: {e}")
+        return None
 
 
-
-def finalizar_pedido(pedido_id):
-    """Marca un pedido como completado"""
-    conn = sqlite3.connect('pedidos_bot.db')
-    cursor = conn.cursor()
-    cursor.execute("UPDATE pedidos SET estado = 'completado' WHERE id = ?", (pedido_id,))
-    conn.commit()
-    conn.close()
+def finalizar_pedido(invoice_id):
+    """Marca un invoice como completado"""
+    try:
+        db = get_db()
+        db.execute('''
+            UPDATE invoices 
+            SET estado = 'completado' 
+            WHERE id = ?
+        ''', (invoice_id,))
+        
+    except sqlite3.Error as e:
+        print(f"Error al finalizar invoice: {e}") 

@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from flask import Flask, request, redirect, url_for, render_template, flash
+from flask import Flask, request
 from dotenv import load_dotenv
 from bot_core import create_and_initialize_app
 from database.db import init_db
