@@ -1,43 +1,50 @@
 import sqlite3
-from database.db import get_db
+from typing import Any
+from database.db_manager import get_db
 
 # ====================== FUNCIONES DE PRODUCTOS ======================
-def get_categorias():
+def obtener_categorias_db():
     try:
         db = get_db()
-        categories = db.execute("""
+        categories: list[Any] | None = db.execute("""
                     SELECT categories.descripcion FROM categories 
                     INNER JOIN products ON categories.id = products.category_id 
                             WHERE products.disponible = 1 
                             GROUP BY categories.descripcion 
                             ORDER BY categories.descripcion
                 """, fetchall=True)
-        return [row[0] for row in categories]
+        if categories is not None:
+            return [row['descripcion'] for row in categories]
+        return []
         
     except sqlite3.Error as e:
         print(f"Error al obtener categorías: {e}")
         return []  # Retorna lista vacía en caso de error
 
-def get_productos_por_categoria(categoria):
+
+def obtener_productos_por_categoria(categoria):
     """Obtiene productos de una categoría específica"""
     try:
         db = get_db()
-        productos_x_cat = db.execute('''
+        productos_x_cat: list[Any] | None = db.execute('''
                 SELECT products.id, products.nombre, products.descripcion, products.precio 
                 FROM products 
                 INNER JOIN categories ON products.category_id = categories.id
                 WHERE categories.descripcion = ? AND products.disponible = 1
                 ORDER BY nombre
             ''', (categoria,), fetchall=True)
-        productos = [ (row[0], row[1], row[2], row[3]) for row in productos_x_cat ]
-        return productos
+        if productos_x_cat is not None:
+            productos = [ (row['id'], row['nombre'], row['descripcion'], row['precio']) \
+                         for row in productos_x_cat ]
+            return productos
+        return []
     
     except sqlite3.Error as e:
         print(f"Error al obtener productos por categoría: {e}")
         return []  # Retorna lista vacía en caso de error
 
 
-def get_producto_por_id(product_id):
+def obtener_producto_por_id(product_id):
     """Obtiene información de un producto específico"""
     try:
         db = get_db()
@@ -52,27 +59,32 @@ def get_producto_por_id(product_id):
         print(f"Error al obtener producto por ID: {e}")
         return None
 
+
 # ====================== FUNCIONES DE CLIENTES ======================
-def registrar_cliente(telegram_id, nombre, apellido, username, telefono=None, direccion=None):
+def guardar_cliente(telegram_id, nombre, apellido, username, email, telefono=None, direccion=None):
     """Registra o actualiza un cliente"""
     try:
         db = get_db()
-        #db.execute('''
-        #    INSERT OR REPLACE INTO clientes (telegram_id, nombre, apellido, username, telefono, direccion)
-        #    VALUES (?, ?, ?, ?, ?, ?)
-        #    ''', (telegram_id, nombre, apellido, username, telefono, direccion))
         
         #insertar en table customers si no existe
-        db.execute('''
-            INSERT OR REPLACE INTO customers (customer_id, name, phone, address, username)
-            VALUES (?, ?, ?, ?, ?)
-            ''', (telegram_id, f"{nombre} {apellido}", None, None, username))
+        #si el cliente ya existe, actualizar su información (excepto el customer_id que es el telegram_id)
+        if db.execute('SELECT id FROM customers WHERE customer_id = ?', (telegram_id,), fetchone=True):
+            db.execute('''
+            UPDATE customers 
+            SET name = ?, phone = ?, address = ?, username = ?, email = ?
+            WHERE customer_id = ?
+            ''', (f"{nombre} {apellido}", telefono, direccion, username, email, telegram_id))
+        else:   
+            db.execute('''
+                INSERT OR IGNORE INTO customers (customer_id, name, phone, address, username, email)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''', (telegram_id, f"{nombre} {apellido}", telefono, direccion, username, email))
         
     except sqlite3.Error as e:
         print(f"Error al registrar cliente: {e}")
 
 
-def get_cliente(telegram_id):
+def obtener_cliente(telegram_id):
     """Obtiene información de un cliente"""
     try:
         db = get_db()
@@ -96,11 +108,9 @@ def crear_pedido(customer_id):
         if not customer:
             print(f"Cliente con ID {customer_id} no encontrado")
             return None
-        customer_id = customer[0]
+        customer_id = customer['id']
 
-        db.execute('INSERT INTO invoices (customer_id) VALUES (?)', (customer_id,))
-        invoice = db.execute('SELECT last_insert_rowid()', fetchone=True)
-        invoice_id = invoice[0] if invoice else None
+        invoice_id = db.execute('INSERT INTO invoices (customer_id) VALUES (?)', (customer_id,))
         return invoice_id
     
     except sqlite3.Error as e:
@@ -108,18 +118,22 @@ def crear_pedido(customer_id):
         return None
 
 
-def eliminar_todos_productos_de_pedido(invoice_id):
+def vaciar_pedido_db(invoice_id):
     try:
         db = get_db()
         # Eliminar todos los items del pedido
         db.execute('DELETE FROM invoice_items WHERE invoice_id = ?', (invoice_id,))
         # Actualizar total del pedido a 0
         db.execute('UPDATE invoices SET total = 0 WHERE id = ?', (invoice_id,))
+
+        return True
+    
     except sqlite3.Error as e:
         print(f"Error al eliminar todos los productos del pedido: {e}") 
+        return False
 
 
-def agregar_producto_a_pedido(invoice_id, producto_id, cantidad):
+def agregar_producto(invoice_id, producto_id, cantidad):
     """Agrega un producto a un pedido"""
     try:
         db = get_db()
@@ -130,7 +144,7 @@ def agregar_producto_a_pedido(invoice_id, producto_id, cantidad):
         if not product:
             return False
         
-        precio_unitario = product[0]
+        precio_unitario = product['precio']
         
         # Verificar si el producto ya está en el pedido
         item_existente = db.execute('''
@@ -181,7 +195,7 @@ def obtener_pedido_actual(customer_id):
         if not customer:
             print(f"Cliente con ID {customer_id} no encontrado")
             return None
-        customer_id = customer[0]
+        customer_id = customer['id']
 
         pedido = db.execute('''
             SELECT p.id, p.total, COUNT(pi.id) as items
@@ -203,7 +217,7 @@ def obtener_detalle_pedido(invoice_id):
     """Obtiene el detalle completo de un invoice"""
     try:
         db = get_db()
-            # Información del pedido
+        # Información del pedido
         info_pedido = db.execute('''
             SELECT p.id, p.fecha, p.estado, p.total, c.name
             FROM invoices p
@@ -226,7 +240,7 @@ def obtener_detalle_pedido(invoice_id):
         return None, []
 
 
-def eliminar_producto_de_db(invoice_id, producto_id):
+def quitar_producto_del_pedido(invoice_id, producto_id):
     """
     Elimina un producto de la base de datos.
     Retorna True si fue exitoso, False si hubo error.
@@ -269,7 +283,7 @@ def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
     Retorna True si fue exitoso.
     """
     if nueva_cantidad <= 0:
-        return eliminar_producto_de_db(invoice_id, producto_id)
+        return quitar_producto_del_pedido(invoice_id, producto_id)
     
     try:
         db = get_db()
@@ -321,7 +335,7 @@ def verificar_stock_disponible(producto_id):
     # conn.close()
     # return resultado[0] if resultado else None
     
-    return None  # Por ahora, sin límite
+    return True  # Por ahora, sin límite
 
 
 def obtener_cantidad_producto(invoice_id, producto_id):
@@ -332,14 +346,14 @@ def obtener_cantidad_producto(invoice_id, producto_id):
             SELECT cantidad FROM invoice_items 
             WHERE invoice_id = ? AND product_id = ?
         ''', (invoice_id, producto_id), fetchone=True)
-        return resultado[0] if resultado else None
+        return resultado['cantidad'] if resultado else None
     
     except sqlite3.Error as e:
         print(f"Error al obtener cantidad de producto: {e}")
         return None
 
 
-def finalizar_pedido(invoice_id):
+def finalizar_pedido_db(invoice_id):
     """Marca un invoice como completado"""
     try:
         db = get_db()
@@ -351,3 +365,58 @@ def finalizar_pedido(invoice_id):
         
     except sqlite3.Error as e:
         print(f"Error al finalizar invoice: {e}") 
+
+
+#======================= FUNCIONES DE PAGOS ======================
+
+def guardar_pago(telegram_id, mp_payment_id, invoice_id, monto, concepto, estado='pendiente'):
+    """Guarda el pago en base de datos"""
+    try:
+        db = get_db()
+        pago_id = db.execute('''
+            INSERT INTO payments (telegram_id, mp_payment_id, invoice_id, monto, concepto, estado)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (telegram_id, mp_payment_id, invoice_id, monto, concepto, estado))
+        print(f"💾 Pago guardado en BD: {mp_payment_id} - {concepto} - ${monto}")
+        
+        return pago_id
+    except sqlite3.Error as e:
+        print(f"Error al guardar pago en BD: {e}")
+        return None
+
+
+def actualizar_pago(payment_id, invoice_id, estado, monto, fecha_aprobacion=None):
+    """Actualiza el estado del pago en nuestra BD"""
+    try:
+        db = get_db()
+        db.execute('''
+            UPDATE payments 
+            SET estado = ?, fecha_aprobacion = ?, mp_payment_id = ?
+            WHERE invoice_id = ? AND monto = ?
+        ''', (estado, fecha_aprobacion, payment_id, invoice_id, monto))
+    
+        print(f"💾 Pago {payment_id} actualizado a {estado}")
+
+    except sqlite3.Error as e:
+        print(f"Error al actualizar pago: {e}")
+
+
+def buscar_ultimo_pago_usuario(customer_id):
+    """Busca el último pago realizado por un cliente"""
+    try:
+        db = get_db()
+        payment = db.execute('''
+            SELECT monto, concepto, estado, fecha_creacion, fecha_aprobacion, mp_payment_id FROM payments 
+            WHERE telegram_id = ? 
+            ORDER BY fecha_creacion DESC 
+            LIMIT 1
+        ''', (customer_id,), fetchone=True)
+        return payment
+    
+    except sqlite3.Error as e:
+        print(f"Error al buscar último pago: {e}")
+        return None
+    
+    
+    
+    

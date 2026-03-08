@@ -9,11 +9,11 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 from dotenv import load_dotenv
-from database.db import init_db
+from database.db_sqlite import init_db
 from routes.csv_routes import csv_bp
 from shared.handlers.commands import (
     start, mensajes_texto, manejar_seleccion_producto, mostrar_productos_categoria,
-    ver_carrito, finalizar_pedido_handler, manejar_botones_carrito, manejar_confirmacion_eliminar
+    ver_pedido, finalizar_pedido, manejar_botones_carrito, manejar_confirmacion_eliminar
 )
 
 # ==================== CONFIGURACIÓN BÁSICA ====================
@@ -53,8 +53,8 @@ botapp = Application.builder().token(TOKEN).build()
 botapp.add_handler(CallbackQueryHandler(manejar_confirmacion_eliminar, pattern='^(confirm_del_|cancel_del)'))
 botapp.add_handler(CallbackQueryHandler(manejar_seleccion_producto, pattern='^(add_|rem_|info_)'))
 botapp.add_handler(CallbackQueryHandler(mostrar_productos_categoria, pattern='^cat_'))
-botapp.add_handler(CallbackQueryHandler(ver_carrito, pattern='^ver_carrito$'))
-botapp.add_handler(CallbackQueryHandler(finalizar_pedido_handler, pattern='^finalizar_'))
+botapp.add_handler(CallbackQueryHandler(ver_pedido, pattern='^ver_carrito$'))
+botapp.add_handler(CallbackQueryHandler(finalizar_pedido, pattern='^finalizar_'))
 botapp.add_handler(CallbackQueryHandler(manejar_botones_carrito))
 botapp.add_handler(CommandHandler("start", start))
 botapp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mensajes_texto))
@@ -122,7 +122,7 @@ def health():
 
 @app_flask.route('/health_db')
 def health_db():
-    from database.db import get_db
+    from database.db_sqlite import get_db
     try:
         get_db().execute("SELECT 1")
         return jsonify({'status': 'healthy', 'database': 'ok'}), 200

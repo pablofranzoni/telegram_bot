@@ -4,7 +4,7 @@ import csv
 import tempfile
 import logging
 from datetime import datetime
-from database.db import get_db
+from database.db_sqlite import get_db
 
 logger = logging.getLogger(__name__)
 csv_bp = Blueprint('csv', __name__)

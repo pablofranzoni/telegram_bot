@@ -1,11 +1,16 @@
 import os
 import asyncio
 import logging
-from flask import Flask, request
+import requests
+
+from flask import Flask, jsonify, request
 from dotenv import load_dotenv
+
 from bot_core import create_and_initialize_app
-from database.db import init_db
+from database import db_manager
+from database.db_factory import DatabaseType
 from routes.csv_routes import csv_bp
+from utils import mpago
 
 # ==================== CONFIGURACIÓN ====================
 load_dotenv()
@@ -30,7 +35,6 @@ app_flask = Flask(__name__, template_folder='templates',  # Por defecto ya es 't
 
 # Configuración para upload de archivos
 app_flask.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', '4D1xGWans1S6JBeUDJ1NebpG')
-app_flask.config['DATABASE_PATH'] = os.path.join(basedir, 'pedidos_bot.db')
 app_flask.config['UPLOAD_FOLDER'] = './uploads'  # Carpeta donde se guardarán los archivos
 app_flask.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024  # Límite de 4MB
 app_flask.config['ALLOWED_EXTENSIONS'] = {'csv'}
@@ -39,14 +43,11 @@ app_flask.config['ALLOWED_EXTENSIONS'] = {'csv'}
 telegram_app = None
 
 os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
-init_db(app_flask)
+
+db_manager.init_db(DatabaseType.SQLITE, db_path="./pedidos_bot.db")
 
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
 
-def allowed_file(filename):
-    """Verificar si la extensión del archivo está permitida"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app_flask.config['ALLOWED_EXTENSIONS']
 
 def get_or_create_telegram_app():
     """Obtiene o crea la aplicación de Telegram (singleton)"""
@@ -56,6 +57,7 @@ def get_or_create_telegram_app():
         telegram_app = create_and_initialize_app(TOKEN, BOT_MODE)
     
     return telegram_app
+
 
 # ==================== ENDPOINTS FLASK ====================
 @app_flask.route('/')
@@ -85,6 +87,7 @@ def webhook():
     try:
         # 1. Obtener datos
         json_data = request.get_json()
+
         if not json_data:
             logger.error("❌ No se recibió JSON")
             return 'No JSON received', 400
@@ -116,6 +119,7 @@ def webhook():
     except Exception as e:
         logger.error(f"❌ Error procesando webhook: {e}", exc_info=True)
         return f'Error: {str(e)}', 500
+    
 
 @app_flask.route('/health')
 def health():
@@ -142,7 +146,7 @@ def health():
 
 @app_flask.route('/health_db')
 def health_db():
-    from database.db import get_db
+    from database.db_manager import get_db
     try:
         # Verificar base de datos
         get_db().execute("SELECT 1")
@@ -151,14 +155,74 @@ def health_db():
         return {'status': 'unhealthy', 'error': str(e)}, 500
 
 
+@app_flask.route('/<string:estado>', methods=['GET', 'POST'])
+def procesar_pago(estado):
+    # Validar que el estado sea uno de los permitidos
+    estados_permitidos = ['okpago', 'failpago', 'pendpago']
+    
+    if estado not in estados_permitidos:
+        return jsonify({
+            "status": "error",
+            "message": "Estado no válido"
+        }), 404
+    
+    print(f"Procesando estado: {estado}")
+    
+    # Lógica según el estado
+    if estado == 'okpago':
+        mensaje = "Pago procesado correctamente"
+        codigo = 200
+    elif estado == 'pending':
+        mensaje = "Pago en proceso"
+        codigo = 202
+    elif estado == 'error':
+        mensaje = "Error en el procesamiento del pago"
+        codigo = 400
+    
+    # Obtener datos si es POST
+    datos_recibidos = None
+    if request.method == 'POST':
+        datos_recibidos = request.get_json() or request.form.to_dict()
+        print(f"Datos recibidos para {estado}: {datos_recibidos}")
+    
+    return jsonify({
+        "status": estado,
+        "message": mensaje,
+        "endpoint": f"/{estado}",
+        "datos_recibidos": datos_recibidos
+    }), codigo
+
+
+@app_flask.route('/mercadopago-webhook/', methods=['POST'])
+def mercadopago_webhook():
+    """Endpoint para recibir notificaciones de MercadoPago"""
+    data = request.get_json()
+    topic = data.get('type') or data.get('topic') or request.args.get('topic')
+    
+    print(f"📌 Webhook recibido - Topic: {topic}")
+    
+    # Obtener el ID según el tipo
+    resource_id = data.get('data', {}).get('id')
+    
+    if topic == 'payment':
+        # Procesar pago directo
+        mp = mpago.MercadoPagoSimple()
+        if mpago.verificar_firma(request, resource_id):
+            mp.procesar_notificacion_pago(resource_id)
+    
+    elif topic == 'merchant_order':
+        # Consultar la orden para obtener los pagos
+        mp = mpago.MercadoPagoSimple()
+        mp.procesar_merchant_order(resource_id)
+        
+    return jsonify({"status": "ok"}), 200
+
 # ==================== CONFIGURACIÓN INICIAL ====================
 def setup_webhook():
     """Configura el webhook en Telegram (se ejecuta al inicio)"""
     if not TOKEN or not WEBHOOK_URL:
         logger.warning("⚠️  No se puede configurar webhook: Token o URL faltantes")
         return
-    
-    import requests
     
     webhook_endpoint = f"{WEBHOOK_URL.rstrip('/')}/webhook"
     
@@ -203,5 +267,7 @@ if __name__ == '__main__':
     print(f"Token: {'✅' if TOKEN else '❌'} {'Configurado' if TOKEN else 'Faltante'}")
     print(f"Webhook URL: {WEBHOOK_URL or 'No configurada'}")
     
+    setup_webhook()
+
     # Para pruebas locales, no configuramos webhook real
     app_flask.run(host='0.0.0.0', port=5000, debug=True)
