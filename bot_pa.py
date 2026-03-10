@@ -44,7 +44,9 @@ telegram_app = None
 
 os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 
-db_manager.init_db(DatabaseType.SQLITE, db_path="./pedidos_bot.db")
+
+#db_manager.init_db(DatabaseType.SQLITE, db_path="./pedidos_bot.db")
+db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL'))
 
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
 
