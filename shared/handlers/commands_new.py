@@ -28,7 +28,6 @@ from .products import (
 )
 
 from .cart import (
-    agregar_y_salir_flujo_productos,
     manejar_botones_carrito,
     ver_pedido,
     finalizar_pedido,
@@ -69,7 +68,6 @@ __all__ = [
     "mostrar_productos_categoria",
     "seleccionar_producto",
     "cancelar_opcion_producto",
-    "agregar_y_salir_flujo_productos",
     "manejar_botones_carrito",
     "ver_pedido",
     "finalizar_pedido",
@@ -87,5 +85,5 @@ __all__ = [
     "manejar_confirmacion_eliminar",
     "mensajes_texto",
     "cmd_estado_pago",
-    "error_handler",
+    "error_handler"
 ]

@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 
+class DatabaseError(Exception):
+    """Excepción base para errores de base de datos."""
+    pass
+
 class DatabaseInterface(ABC):
     """Interfaz común para todas las implementaciones de base de datos"""
     
@@ -10,7 +14,7 @@ class DatabaseInterface(ABC):
         pass
     
     @abstractmethod
-    def execute(self, query, params=(), fetchone=False, fetchall=False):
+    def execute(self, query, params=(), fetchone=False, fetchall=False, param_types=None):
         pass
     
     @abstractmethod

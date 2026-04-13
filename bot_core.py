@@ -12,6 +12,7 @@ from telegram.ext import (
 )
 
 from utils.config import Config
+from utils.logging_config import configure_logging
 from database.db_manager import db_manager, DatabaseType
 from utils.constants import EstadoConversacion
 from shared.handlers.commands import (
@@ -25,6 +26,7 @@ from shared.handlers.commands import (
     cancelar_opcion_producto,
     seleccionar_categoria,
     seleccionar_producto,
+    agregar_y_salir_flujo_productos,
     mensajes_texto,
     obtener_categorias,
     ver_pedido,
@@ -32,15 +34,12 @@ from shared.handlers.commands import (
     manejar_botones_carrito,
     manejar_confirmacion_eliminar,
     manejar_confirmacion_finalizar_pedido,
-    cmd_estado_pago
+    cmd_estado_pago,
+    error_handler
 )
 
+configure_logging()
 
-# Configuración de logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
 def init_database():
@@ -102,12 +101,14 @@ def create_and_initialize_app(bot_token, bot_mode):
                 MessageHandler(filters.TEXT & ~filters.COMMAND, seleccionar_categoria)
             ],
             EstadoConversacion.ESPERANDO_PRODUCTO.value: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, seleccionar_producto)
+                MessageHandler(filters.TEXT & ~filters.COMMAND, seleccionar_producto),
+                CallbackQueryHandler(agregar_y_salir_flujo_productos, pattern='^add_'),
+                CallbackQueryHandler(manejar_botones_carrito, pattern='^(info_|prod_)')
             ],
         },
         fallbacks=[
             CommandHandler("cancelar_productos", cancelar_opcion_producto),
-            CommandHandler('carrito', ver_pedido),
+            CommandHandler("mi_pedido", ver_pedido),
             CommandHandler('ayuda', ver_ayuda),
         ],
         allow_reentry=True,
@@ -116,11 +117,7 @@ def create_and_initialize_app(bot_token, bot_mode):
     app.add_handler(products_conv_handler)  
     
     app.add_handler(CallbackQueryHandler(manejar_confirmacion_eliminar, pattern='^(confirm_del_|cancel_del)'))
-    app.add_handler(CallbackQueryHandler(manejar_confirmacion_finalizar_pedido, pattern='^(confirm_finalize_|cancel_finalize_)'))
-    #app.add_handler(CallbackQueryHandler(manejar_seleccion_producto, pattern='^(add_|rem_|info_)'))
-    #app.add_handler(CallbackQueryHandler(mostrar_productos_categoria, pattern='^cat_'))
-    #app.add_handler(CommandHandler("carrito", ver_pedido))
-    #app.add_handler(CallbackQueryHandler(ver_pedido, pattern='^ver_pedido$'))
+    app.add_handler(CallbackQueryHandler(manejar_confirmacion_finalizar_pedido, pattern=r'^(confirm_finalize_\d+|cancel_finalize)$'))
     app.add_handler(CallbackQueryHandler(finalizar_pedido, pattern='^finalizar_'))
     app.add_handler(CallbackQueryHandler(manejar_botones_carrito))
 
@@ -149,15 +146,20 @@ def create_and_initialize_app(bot_token, bot_mode):
     # Manejador de mensajes de texto (teclado principal)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mensajes_texto))
     
-    # 3. ✅ INICIALIZAR LA APLICACIÓN (ESTO ES CLAVE)
+    app.add_error_handler(error_handler)
+
     # Creamos un event loop para inicializar
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    #loop = asyncio.new_event_loop()
+    #asyncio.set_event_loop(loop)
 
     if bot_mode == "POLLING":
-        print("🚀 Iniciando bot en modo POLLING...")
+        logger.info("Iniciando bot en modo POLLING")
         app.run_polling(drop_pending_updates=True) 
     else:
+        # Creamos un event loop para inicializar
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         try:
             loop.run_until_complete(app.initialize())
             logger.info("✅ Application inicializada correctamente")
@@ -173,7 +175,7 @@ if __name__ == "__main__":
     from dotenv import load_dotenv
 
     load_dotenv()
-    TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    TOKEN = os.getenv('BOT_TOKEN')
     BOT_MODE = os.getenv('BOT_MODE', 'POLLING')
 
     create_and_initialize_app(TOKEN, BOT_MODE)

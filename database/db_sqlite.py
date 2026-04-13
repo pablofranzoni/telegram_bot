@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Any
 
-from database.db import DatabaseInterface
+from database.db import DatabaseError, DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class SQLiteDatabase(DatabaseInterface):
             conn.commit()
         except Exception as e:
             conn.rollback()
-            raise e
+            raise DatabaseError("SQLite cursor error") from e
         finally:
             cursor.close()
             conn.close()
@@ -75,6 +75,9 @@ class SQLiteDatabase(DatabaseInterface):
                 return cursor.fetchall()
             else:
                 return cursor.lastrowid
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise DatabaseError("SQLite execute error") from e
         finally:
             cursor.close()
             conn.close()
@@ -88,6 +91,9 @@ class SQLiteDatabase(DatabaseInterface):
             cursor.executemany(query, params_list)
             conn.commit()
             return cursor.rowcount
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise DatabaseError("SQLite executemany error") from e
         finally:
             cursor.close()
             conn.close()

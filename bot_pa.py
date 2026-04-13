@@ -5,26 +5,23 @@ import requests
 
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
+from telegram.ext import Application
 
 from bot_core import create_and_initialize_app
 from database import db_manager
 from database.db_factory import DatabaseType
 from routes.csv_routes import csv_bp
 from utils import mpago
+from utils.logging_config import configure_logging
 
 # ==================== CONFIGURACIÓN ====================
 load_dotenv()
 
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TOKEN = os.getenv('BOT_TOKEN')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 BOT_MODE = os.getenv('BOT_MODE', 'WEBHOOK')  
 
-# Configurar logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
 
@@ -40,7 +37,7 @@ app_flask.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024  # Límite de 4MB
 app_flask.config['ALLOWED_EXTENSIONS'] = {'csv'}
 
 # Variable global para la app de Telegram (se inicializa una sola vez)
-telegram_app = None
+telegram_app: Application | None = None
 
 os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -51,12 +48,15 @@ db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
 
 
-def get_or_create_telegram_app():
+def get_or_create_telegram_app() -> Application:
     """Obtiene o crea la aplicación de Telegram (singleton)"""
     global telegram_app
     
     if telegram_app is None:
         telegram_app = create_and_initialize_app(TOKEN, BOT_MODE)
+
+    if telegram_app is None:
+        raise RuntimeError("No se pudo inicializar la aplicación de Telegram.")
     
     return telegram_app
 
@@ -66,14 +66,16 @@ def get_or_create_telegram_app():
 def index():
     return '''
         <html>
-            <head><title>Sistema CSV + Telegram Bot</title></head>
+            <head><title>Sistema Telegram Bot</title></head>
             <body>
-                <h1>Sistema de Gestión CSV + Telegram Bot</h1>
+                <h1>Sistema de Gestión Telegram Bot</h1>
                 <p>Endpoints disponibles:</p>
                 <ul>
                     <li><a href="/api/upload">/api/upload</a> - Subir CSV (GET para formulario, POST para subir)</li>
                     <li><a href="/api/uploads">/api/uploads</a> - Ver uploads realizados</li>
                     <li><a href="/api/customers">/api/customers</a> - Listar clientes</li>
+                    <li><a href="/api/categories">/api/categories</a> - Listar categorias</li>
+                    <li><a href="/api/products">/api/products</a> - Listar productos</li>
                     <li><a href="/api/stats">/api/stats</a> - Estadísticas</li>
                 </ul>
                 <p>Telegram Bot también está activo y usando la misma base de datos.</p>
@@ -84,17 +86,23 @@ def index():
 @app_flask.route('/webhook', methods=['POST'])
 def webhook():
     """Endpoint principal para recibir updates de Telegram"""
-    logger.info("📨 Webhook recibido")
+    logger.info("Webhook de Telegram recibido")
     
     try:
         # 1. Obtener datos
         json_data = request.get_json()
 
         if not json_data:
-            logger.error("❌ No se recibió JSON")
+            logger.error("Webhook de Telegram sin JSON")
             return 'No JSON received', 400
         
-        logger.debug(f"Datos recibidos: {json_data}")
+        logger.debug(
+            "Webhook Telegram payload resumido",
+            extra={
+                "payload_keys": sorted(json_data.keys()),
+                "update_id": json_data.get("update_id"),
+            },
+        )
         
         # 2. ✅ Obtener la app TELEGRAM (ya inicializada)
         app_ptb = get_or_create_telegram_app()
@@ -111,7 +119,7 @@ def webhook():
         try:
             # Procesar el update
             loop.run_until_complete(app_ptb.process_update(update))
-            logger.info(f"✅ Update {update.update_id} procesado")
+            logger.info("Update de Telegram procesado", extra={"update_id": update.update_id})
             
             return 'ok'
         finally:
@@ -119,7 +127,7 @@ def webhook():
             pass
             
     except Exception as e:
-        logger.error(f"❌ Error procesando webhook: {e}", exc_info=True)
+        logger.error("Error procesando webhook de Telegram: %s", e, exc_info=True)
         return f'Error: {str(e)}', 500
     
 
@@ -168,7 +176,7 @@ def procesar_pago(estado):
             "message": "Estado no válido"
         }), 404
     
-    print(f"Procesando estado: {estado}")
+    logger.info("Webhook de retorno de pago", extra={"estado": estado, "method": request.method})
     
     # Lógica según el estado
     if estado == 'okpago':
@@ -185,7 +193,10 @@ def procesar_pago(estado):
     datos_recibidos = None
     if request.method == 'POST':
         datos_recibidos = request.get_json() or request.form.to_dict()
-        print(f"Datos recibidos para {estado}: {datos_recibidos}")
+        logger.debug(
+            "Webhook de retorno con payload resumido",
+            extra={"estado": estado, "payload_keys": sorted(datos_recibidos.keys()) if isinstance(datos_recibidos, dict) else []},
+        )
     
     return jsonify({
         "status": estado,
@@ -198,26 +209,72 @@ def procesar_pago(estado):
 @app_flask.route('/mercadopago-webhook/', methods=['POST'])
 def mercadopago_webhook():
     """Endpoint para recibir notificaciones de MercadoPago"""
-    data = request.get_json()
-    topic = data.get('type') or data.get('topic') or request.args.get('topic')
-    
-    print(f"📌 Webhook recibido - Topic: {topic}")
-    
-    # Obtener el ID según el tipo
-    resource_id = data.get('data', {}).get('id')
-    
-    if topic == 'payment':
-        # Procesar pago directo
-        mp = mpago.MercadoPagoSimple()
-        if mpago.verificar_firma(request, resource_id):
-            mp.procesar_notificacion_pago(resource_id)
-    
-    elif topic == 'merchant_order':
-        # Consultar la orden para obtener los pagos
-        mp = mpago.MercadoPagoSimple()
-        mp.procesar_merchant_order(resource_id)
-        
-    return jsonify({"status": "ok"}), 200
+    try:
+        data = request.get_json(silent=True) or {}
+        topic = data.get('type') or data.get('topic') or request.args.get('type') or request.args.get('topic')
+
+        # Mercado Pago puede enviar el ID por JSON o query params
+        resource_id = (
+            data.get('data', {}).get('id')
+            or request.args.get('id')
+            or request.args.get('data.id')
+        )
+
+        logger.info(
+            "Webhook de Mercado Pago recibido",
+            extra={
+                "topic": topic,
+                "resource_id": resource_id,
+                "has_json_payload": bool(data),
+                "query_keys": sorted(request.args.keys()),
+            },
+        )
+
+        if not topic:
+            logger.warning("Webhook MP descartado: topic ausente")
+            return jsonify({"status": "ignored", "reason": "missing_topic"}), 400
+
+        if topic == 'payment':
+            if not resource_id:
+                logger.warning("Webhook MP payment descartado: payment id ausente")
+                return jsonify({"status": "ignored", "reason": "missing_payment_id"}), 400
+
+            signature_ok = mpago.verificar_firma(request, resource_id)
+            logger.info(
+                "Validacion de firma webhook MP",
+                extra={"resource_id": resource_id, "signature_ok": signature_ok},
+            )
+
+            if not signature_ok:
+                return jsonify({"status": "ignored", "reason": "invalid_signature"}), 400
+
+            mp = mpago.MercadoPagoSimple()
+            result = mp.procesar_notificacion_pago(resource_id)
+            logger.info(
+                "Resultado procesamiento payment webhook MP",
+                extra={"resource_id": resource_id, "result": result},
+            )
+            return jsonify({"status": "ok", "topic": topic}), 200
+
+        if topic == 'merchant_order':
+            if not resource_id:
+                logger.warning("Webhook MP merchant_order descartado: resource id ausente")
+                return jsonify({"status": "ignored", "reason": "missing_merchant_order_id"}), 400
+
+            mp = mpago.MercadoPagoSimple()
+            mp.procesar_merchant_order(resource_id)
+            logger.info(
+                "merchant_order procesada",
+                extra={"resource_id": resource_id},
+            )
+            return jsonify({"status": "ok", "topic": topic}), 200
+
+        logger.info("Webhook MP ignorado por topic no manejado", extra={"topic": topic})
+        return jsonify({"status": "ignored", "topic": topic}), 200
+
+    except Exception as e:
+        logger.exception("Error en webhook de Mercado Pago")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ==================== CONFIGURACIÓN INICIAL ====================
 def setup_webhook():
@@ -265,9 +322,8 @@ if __name__ != '__main__' and os.getenv('PYTHONANYWHERE_DOMAIN'):
 
 # ==================== EJECUCIÓN LOCAL (para pruebas) ====================
 if __name__ == '__main__':
-    print("🤖 Bot Flask - Modo Prueba")
-    print(f"Token: {'✅' if TOKEN else '❌'} {'Configurado' if TOKEN else 'Faltante'}")
-    print(f"Webhook URL: {WEBHOOK_URL or 'No configurada'}")
+    logger.info("Bot Flask en modo prueba local")
+    logger.info("Estado de configuracion", extra={"token_configurado": bool(TOKEN), "webhook_configurado": bool(WEBHOOK_URL)})
     
     setup_webhook()
 

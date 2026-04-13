@@ -2,7 +2,7 @@ import pymysql
 from pymysql.cursors import DictCursor
 from contextlib import contextmanager
 
-from database.db import DatabaseInterface
+from database.db import DatabaseError, DatabaseInterface
 
 class MySQLDatabase(DatabaseInterface):
     def __init__(self, host=None, user=None, password=None, database=None, port=3306, **kwargs):
@@ -63,7 +63,7 @@ class MySQLDatabase(DatabaseInterface):
             conn.commit()
         except Exception as e:
             conn.rollback()
-            raise e
+            raise DatabaseError("MySQL cursor error") from e
         finally:
             cursor.close()
             self._return_connection(conn)
@@ -85,7 +85,7 @@ class MySQLDatabase(DatabaseInterface):
                 return cursor.lastrowid
         except Exception as e:
             conn.rollback()
-            raise e
+            raise DatabaseError("MySQL execute error") from e
         finally:
             cursor.close()
             self._return_connection(conn)
@@ -101,7 +101,7 @@ class MySQLDatabase(DatabaseInterface):
             return cursor.rowcount
         except Exception as e:
             conn.rollback()
-            raise e
+            raise DatabaseError("MySQL executemany error") from e
         finally:
             cursor.close()
             self._return_connection(conn)

@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from database.db_sqlite import init_db
 from routes.csv_routes import csv_bp
 from shared.handlers.commands import (
-    start, mensajes_texto, manejar_seleccion_producto, mostrar_productos_categoria,
+    start, mensajes_texto, manejar_botones_carrito, mostrar_productos_categoria,
     ver_pedido, finalizar_pedido, manejar_botones_carrito, manejar_confirmacion_eliminar
 )
 
@@ -51,7 +51,7 @@ app_flask.register_blueprint(csv_bp, url_prefix='/api')
 botapp = Application.builder().token(TOKEN).build()
 
 botapp.add_handler(CallbackQueryHandler(manejar_confirmacion_eliminar, pattern='^(confirm_del_|cancel_del)'))
-botapp.add_handler(CallbackQueryHandler(manejar_seleccion_producto, pattern='^(add_|rem_|info_)'))
+botapp.add_handler(CallbackQueryHandler(manejar_botones_carrito, pattern='^(add_|rem_|info_)'))
 botapp.add_handler(CallbackQueryHandler(mostrar_productos_categoria, pattern='^cat_'))
 botapp.add_handler(CallbackQueryHandler(ver_pedido, pattern='^ver_carrito$'))
 botapp.add_handler(CallbackQueryHandler(finalizar_pedido, pattern='^finalizar_'))
