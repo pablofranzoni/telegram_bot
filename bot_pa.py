@@ -1,7 +1,10 @@
 import os
 import asyncio
 import logging
+import threading
+import hmac
 import requests
+import atexit
 
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
@@ -11,6 +14,9 @@ from bot_core import create_and_initialize_app
 from database import db_manager
 from database.db_factory import DatabaseType
 from routes.csv_routes import csv_bp
+from routes.products_routes import products_bp
+from routes.categories_routes import categories_bp
+from routes.invoices_routes import invoices_bp
 from utils import mpago
 from utils.logging_config import configure_logging
 
@@ -20,10 +26,16 @@ load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 BOT_MODE = os.getenv('BOT_MODE', 'WEBHOOK')  
+WEBHOOK_PATH_TOKEN = os.getenv('TELEGRAM_WEBHOOK_PATH_TOKEN')
+WEBHOOK_SECRET_TOKEN = os.getenv('TELEGRAM_WEBHOOK_SECRET_TOKEN')
 
 configure_logging()
 logger = logging.getLogger(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
+
+if BOT_MODE != 'WEBHOOK':
+    logger.warning("BOT_MODE=%s ignorado: este servicio solo soporta WEBHOOK", BOT_MODE)
+    BOT_MODE = 'WEBHOOK'
 
 # ==================== FLASK APP ====================
 app_flask = Flask(__name__, template_folder='templates',  # Por defecto ya es 'templates'
@@ -38,6 +50,10 @@ app_flask.config['ALLOWED_EXTENSIONS'] = {'csv'}
 
 # Variable global para la app de Telegram (se inicializa una sola vez)
 telegram_app: Application | None = None
+telegram_loop: asyncio.AbstractEventLoop | None = None
+telegram_loop_thread: threading.Thread | None = None
+bootstrap_lock = threading.Lock()
+bootstrap_done = False
 
 os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -46,19 +62,72 @@ os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL'))
 
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
+app_flask.register_blueprint(products_bp, url_prefix='/api')
+app_flask.register_blueprint(categories_bp, url_prefix='/api')
+app_flask.register_blueprint(invoices_bp, url_prefix='/api')
 
 
 def get_or_create_telegram_app() -> Application:
     """Obtiene o crea la aplicación de Telegram (singleton)"""
-    global telegram_app
+    global telegram_app, telegram_loop, telegram_loop_thread
     
     if telegram_app is None:
-        telegram_app = create_and_initialize_app(TOKEN, BOT_MODE)
+        telegram_app = create_and_initialize_app(TOKEN, BOT_MODE, initialize_app=False)
 
     if telegram_app is None:
-        raise RuntimeError("No se pudo inicializar la aplicación de Telegram.")
+        raise RuntimeError("No se pudo crear la aplicación de Telegram.")
+
+    if telegram_loop is None:
+        telegram_loop = asyncio.new_event_loop()
+        telegram_loop_thread = threading.Thread(
+            target=_run_telegram_loop,
+            args=(telegram_loop,),
+            daemon=True,
+            name="telegram-ptb-loop",
+        )
+        telegram_loop_thread.start()
+        logger.info("Loop dedicado de PTB iniciado")
+
+        init_future = asyncio.run_coroutine_threadsafe(
+            telegram_app.initialize(),
+            telegram_loop,
+        )
+        init_future.result(timeout=30)
+        logger.info("Application PTB inicializada en loop dedicado")
     
     return telegram_app
+
+
+def _run_telegram_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Ejecuta un loop dedicado para PTB en un hilo separado."""
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
+def _shutdown_telegram_app() -> None:
+    """Cierra correctamente PTB y su loop dedicado al terminar el proceso."""
+    global telegram_app, telegram_loop, telegram_loop_thread
+
+    if telegram_loop is None:
+        return
+
+    try:
+        if telegram_app is not None:
+            shutdown_future = asyncio.run_coroutine_threadsafe(
+                telegram_app.shutdown(),
+                telegram_loop,
+            )
+            shutdown_future.result(timeout=15)
+    except Exception:
+        logger.exception("Error al cerrar Application PTB")
+    finally:
+        telegram_loop.call_soon_threadsafe(telegram_loop.stop)
+        if telegram_loop_thread is not None:
+            telegram_loop_thread.join(timeout=5)
+        telegram_loop.close()
+
+
+atexit.register(_shutdown_telegram_app)
 
 
 # ==================== ENDPOINTS FLASK ====================
@@ -83,12 +152,25 @@ def index():
         </html>
         '''
 
-@app_flask.route('/webhook', methods=['POST'])
-def webhook():
+@app_flask.route('/webhook/<string:webhook_token>', methods=['POST'])
+def webhook(webhook_token: str):
     """Endpoint principal para recibir updates de Telegram"""
     logger.info("Webhook de Telegram recibido")
     
     try:
+        if not WEBHOOK_PATH_TOKEN or not WEBHOOK_SECRET_TOKEN:
+            logger.error("Webhook Telegram deshabilitado: falta configuracion de seguridad")
+            return jsonify({"status": "error", "message": "webhook_misconfigured"}), 503
+
+        if not hmac.compare_digest(webhook_token, WEBHOOK_PATH_TOKEN):
+            logger.warning("Webhook Telegram rechazado por token de ruta invalido")
+            return jsonify({"status": "error", "message": "forbidden"}), 403
+
+        header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(header_secret, WEBHOOK_SECRET_TOKEN):
+            logger.warning("Webhook Telegram rechazado por secret header invalido")
+            return jsonify({"status": "error", "message": "forbidden"}), 403
+
         # 1. Obtener datos
         json_data = request.get_json()
 
@@ -111,24 +193,18 @@ def webhook():
         from telegram import Update
         update = Update.de_json(json_data, app_ptb.bot)
         
-        # 4. ✅ Procesar el update EN EL LOOP CORRECTO
-        # Método 1: Usando el loop existente de la app
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            # Procesar el update
-            loop.run_until_complete(app_ptb.process_update(update))
-            logger.info("Update de Telegram procesado", extra={"update_id": update.update_id})
-            
-            return 'ok'
-        finally:
-            # No cerramos el loop completamente para mantener la app inicializada
-            pass
+        # 4. Procesar en el loop dedicado de PTB para evitar crear loops por request
+        if telegram_loop is None:
+            raise RuntimeError("Loop de Telegram no inicializado")
+
+        future = asyncio.run_coroutine_threadsafe(app_ptb.process_update(update), telegram_loop)
+        future.result(timeout=20)
+        logger.info("Update de Telegram procesado", extra={"update_id": update.update_id})
+        return 'ok'
             
     except Exception as e:
         logger.error("Error procesando webhook de Telegram: %s", e, exc_info=True)
-        return f'Error: {str(e)}', 500
+        return jsonify({"status": "error", "message": "internal_error"}), 500
     
 
 @app_flask.route('/health')
@@ -279,18 +355,29 @@ def mercadopago_webhook():
 # ==================== CONFIGURACIÓN INICIAL ====================
 def setup_webhook():
     """Configura el webhook en Telegram (se ejecuta al inicio)"""
-    if not TOKEN or not WEBHOOK_URL:
-        logger.warning("⚠️  No se puede configurar webhook: Token o URL faltantes")
+    if not TOKEN or not WEBHOOK_URL or not WEBHOOK_PATH_TOKEN or not WEBHOOK_SECRET_TOKEN:
+        logger.warning("⚠️  No se puede configurar webhook: faltan variables requeridas")
         return
-    
-    webhook_endpoint = f"{WEBHOOK_URL.rstrip('/')}/webhook"
+
+    base_url = WEBHOOK_URL.rstrip('/')
+    if base_url.endswith('/webhook'):
+        webhook_base = base_url
+    else:
+        webhook_base = f"{base_url}/webhook"
+
+    webhook_endpoint = f"{webhook_base}/{WEBHOOK_PATH_TOKEN}"
+
+    if not webhook_endpoint.lower().startswith('https://'):
+        logger.error("❌ WEBHOOK_URL debe usar HTTPS en produccion")
+        return
     
     # Configurar webhook
     url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
     payload = {
         "url": webhook_endpoint,
         "drop_pending_updates": True,
-        "allowed_updates": ["message", "callback_query"]
+        "allowed_updates": ["message", "callback_query"],
+        "secret_token": WEBHOOK_SECRET_TOKEN,
     }
     
     try:
@@ -306,26 +393,43 @@ def setup_webhook():
     except Exception as e:
         logger.error(f"❌ Error al configurar webhook: {e}")
 
+
+def bootstrap_webhook_runtime() -> None:
+    """Inicializa recursos de webhook/PTB una sola vez por proceso."""
+    global bootstrap_done
+
+    with bootstrap_lock:
+        if bootstrap_done:
+            return
+
+        setup_webhook()
+        get_or_create_telegram_app()
+        bootstrap_done = True
+
 # ==================== INICIALIZACIÓN ====================
 # WSGI para PythonAnywhere
 application = app_flask
 
-# Configurar webhook al cargar (solo en producción)
 if __name__ != '__main__' and os.getenv('PYTHONANYWHERE_DOMAIN'):
-    logger.info("🚀 Iniciando bot en PythonAnywhere...")
-    
-    # 1. Configurar webhook
-    setup_webhook()
-    
-    # 2. Pre-inicializar la app de Telegram (opcional, se inicializa lazy)
-    # get_or_create_telegram_app()
+    try:
+        bootstrap_webhook_runtime()
+    except Exception:
+        logger.exception("Error inicializando webhook/PTB en import WSGI")
 
 # ==================== EJECUCIÓN LOCAL (para pruebas) ====================
 if __name__ == '__main__':
     logger.info("Bot Flask en modo prueba local")
     logger.info("Estado de configuracion", extra={"token_configurado": bool(TOKEN), "webhook_configurado": bool(WEBHOOK_URL)})
-    
-    setup_webhook()
+
+    # Evita doble inicialización con el reloader: el bootstrap corre solo una vez.
+    run_main_flag = os.environ.get('WERKZEUG_RUN_MAIN')
+    if run_main_flag == 'true' or run_main_flag is None:
+        try:
+            bootstrap_webhook_runtime()
+        except Exception:
+            logger.exception("Error inicializando webhook/PTB en arranque")
+    else:
+        logger.info("Proceso padre del reloader: se omite bootstrap")
 
     # Para pruebas locales, no configuramos webhook real
-    app_flask.run(host='0.0.0.0', port=5000, debug=True)
+    app_flask.run(host='0.0.0.0', port=5000, debug=True, use_reloader=True)

@@ -83,19 +83,22 @@ CREATE TABLE IF NOT EXISTS product_inventory (
         CHECK (stock_reservado <= stock_actual)
 );
 
--- Tabla invoices
+-- 0. ASEGURAR QUE LA EXTENSIÓN ESTÉ ACTIVA
+CREATE EXTENSION IF NOT EXISTS pg_uuidv7;
+
+-- Tabla invoices (Modificada a UUID v7)
 CREATE TABLE IF NOT EXISTS invoices (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v7(), -- Generación automática con tu extensión
     customer_id INTEGER NOT NULL REFERENCES customers(id),
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    estado VARCHAR(20) DEFAULT 'pendiente',          -- Estados limitados
+    estado VARCHAR(20) DEFAULT 'pendiente',
     total NUMERIC DEFAULT 0.0
 );
 
 -- Tabla invoice_items
 CREATE TABLE IF NOT EXISTS invoice_items (
     id SERIAL PRIMARY KEY,
-    invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, -- Tipo cambiado a UUID
     product_id INTEGER NOT NULL REFERENCES products(id),
     cantidad INTEGER NOT NULL,
     precio_unitario NUMERIC NOT NULL,
@@ -106,11 +109,11 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 CREATE TABLE IF NOT EXISTS payments (
     id SERIAL PRIMARY KEY,
     telegram_id BIGINT NOT NULL,
-    mp_payment_id VARCHAR(50) UNIQUE,               -- IDs de MercadoPago
-    invoice_id INTEGER REFERENCES invoices(id),
+    mp_payment_id VARCHAR(50) UNIQUE, -- IDs de MercadoPago
+    invoice_id UUID REFERENCES invoices(id) ON DELETE CASCADE, -- Tipo cambiado a UUID
     monto NUMERIC NOT NULL,
-    concepto VARCHAR(255),                           -- Concepto del pago (ej: 'Pedido #0000000017')
-    estado VARCHAR(20) DEFAULT 'pendiente',          -- Estados limitados
+    concepto VARCHAR(255), -- Concepto del pago
+    estado VARCHAR(20) DEFAULT 'pendiente',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_aprobacion TIMESTAMP
 );
@@ -119,7 +122,7 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS sent_documents (
     id SERIAL PRIMARY KEY,
     document_type VARCHAR(50) NOT NULL,
-    invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, -- Tipo cambiado a UUID
     delivery_channel VARCHAR(20) NOT NULL,
     recipient_target VARCHAR(255) NOT NULL,
     file_name VARCHAR(255) NOT NULL,

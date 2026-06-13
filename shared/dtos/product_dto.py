@@ -10,6 +10,9 @@ class CategoryDTO:
 
     name: str
     description: str
+    id: int | None = None
+    codigo: str | None = None
+    parent_id: int | None = None
 
 
 @dataclass(slots=True)

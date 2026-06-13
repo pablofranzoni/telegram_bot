@@ -689,6 +689,355 @@ def registrar_documento_enviado(invoice_id, document_type, delivery_channel, rec
         return False
 
 
+# ====================== FUNCIONES DE GESTIÓN DE PRODUCTOS (CRUD) ======================
+
+def get_all_products_paginated(limit: int, offset: int) -> list:
+    """Returns a page of products joined with inventory stock."""
+    try:
+        db = get_db()
+        rows = _execute_db(
+            db,
+            '''
+            SELECT p.id, p.nombre, p.descripcion, p.precio, p.disponible,
+                   p.category_id, c.nombre AS category_name,
+                   COALESCE(pi.stock_actual - pi.stock_reservado, 0) AS stock_available
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN product_inventory pi ON pi.product_id = p.id
+            ORDER BY p.id
+            LIMIT ? OFFSET ?
+            ''',
+            (limit, offset),
+            fetchall=True,
+            param_types=['integer', 'integer'],
+        )
+        return rows or []
+    except DatabaseError as e:
+        logger.error("Error al listar productos paginados: %s", e)
+        return []
+
+
+def count_all_products() -> int:
+    """Returns the total number of product rows."""
+    try:
+        db = get_db()
+        result = _execute_db(
+            db,
+            'SELECT COUNT(*) AS total FROM products',
+            fetchone=True,
+        )
+        return int(result['total']) if result else 0
+    except DatabaseError as e:
+        logger.error("Error al contar productos: %s", e)
+        return 0
+
+
+def create_product_db(nombre: str, descripcion: str, precio: float, category_id: int) -> int | None:
+    """Inserts a new product row and returns the new id."""
+    try:
+        db = get_db()
+        new_id = _execute_db(
+            db,
+            '''
+            INSERT INTO products (nombre, descripcion, precio, disponible, category_id)
+            VALUES (?, ?, ?, ?, ?)
+            ''',
+            (nombre, descripcion, precio, True, category_id),
+            param_types=['text', 'text', 'float', 'boolean', 'integer'],
+        )
+        return new_id
+    except DatabaseError as e:
+        logger.error("Error al crear producto '%s': %s", nombre, e)
+        return None
+
+
+def create_inventory_row_db(product_id: int, stock_inicial: int = 0) -> bool:
+    """Inserts an inventory row for a newly created product."""
+    try:
+        db = get_db()
+        _execute_db(
+            db,
+            '''
+            INSERT INTO product_inventory (product_id, stock_actual, stock_reservado, stock_minimo)
+            VALUES (?, ?, 0, 0)
+            ''',
+            (product_id, stock_inicial),
+            param_types=['integer', 'integer'],
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al crear fila de inventario para producto %s: %s", product_id, e)
+        return False
+
+
+def update_product_db(product_id: int, fields: dict) -> bool:
+    """Dynamically updates only the provided fields for a product."""
+    allowed = {'nombre', 'descripcion', 'precio', 'disponible', 'category_id'}
+    sanitized = {k: v for k, v in fields.items() if k in allowed}
+    if not sanitized:
+        return False
+    try:
+        db = get_db()
+        set_clause = ', '.join(f'{col} = ?' for col in sanitized)
+        values = list(sanitized.values()) + [product_id]
+        _execute_db(
+            db,
+            f'UPDATE products SET {set_clause} WHERE id = ?',
+            tuple(values),
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al actualizar producto %s: %s", product_id, e)
+        return False
+
+
+def deactivate_product_db(product_id: int) -> bool:
+    """Soft-deletes a product by setting disponible=False."""
+    try:
+        db = get_db()
+        _execute_db(
+            db,
+            'UPDATE products SET disponible = ? WHERE id = ?',
+            (False, product_id),
+            param_types=['boolean', 'integer'],
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al desactivar producto %s: %s", product_id, e)
+        return False
+
+
+# ====================== FUNCIONES DE CATEGORÍAS (CRUD) ======================
+
+def get_all_categories_db() -> list[dict]:
+    """Returns all categories ordered by name."""
+    try:
+        db = get_db()
+        rows = db.execute(
+            'SELECT id, codigo, nombre, descripcion, parent_id FROM categories ORDER BY nombre',
+            (),
+            fetchall=True,
+        )
+        return list(rows) if rows else []
+    except DatabaseError as e:
+        logger.error("Error al obtener categorías: %s", e)
+        return []
+
+
+def get_category_by_id_db(category_id: int) -> dict | None:
+    """Returns a single category by id, or None."""
+    try:
+        db = get_db()
+        return _execute_db(
+            db,
+            'SELECT id, codigo, nombre, descripcion, parent_id FROM categories WHERE id = ?',
+            (category_id,),
+            fetchone=True,
+            param_types=['integer'],
+        )
+    except DatabaseError as e:
+        logger.error("Error al obtener categoría %s: %s", category_id, e)
+        return None
+
+
+def create_category_db(
+    codigo: str,
+    nombre: str,
+    descripcion: str,
+    parent_id: int | None = None,
+) -> int | None:
+    """Inserts a new category and returns its new id, or None on failure."""
+    try:
+        db = get_db()
+        row = _execute_db(
+            db,
+            'INSERT INTO categories (codigo, nombre, descripcion, parent_id) VALUES (?, ?, ?, ?) RETURNING id',
+            (codigo, nombre, descripcion, parent_id),
+            fetchone=True,
+            param_types=['text', 'text', 'text', 'integer'],
+        )
+        return int(row['id']) if row else None
+    except DatabaseError as e:
+        logger.error("Error al crear categoría '%s': %s", nombre, e)
+        return None
+
+
+def update_category_db(category_id: int, fields: dict) -> bool:
+    """Updates allowed fields of a category. Returns True on success."""
+    allowed = {'codigo', 'nombre', 'descripcion', 'parent_id'}
+    filtered = {k: v for k, v in fields.items() if k in allowed}
+    if not filtered:
+        return False
+    try:
+        db = get_db()
+        set_clause = ', '.join(f'{k} = ?' for k in filtered)
+        values = list(filtered.values()) + [category_id]
+        _execute_db(
+            db,
+            f'UPDATE categories SET {set_clause} WHERE id = ?',
+            tuple(values),
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al actualizar categoría %s: %s", category_id, e)
+        return False
+
+
+def delete_category_db(category_id: int) -> bool:
+    """Deletes a category by id. Returns True on success."""
+    try:
+        db = get_db()
+        _execute_db(
+            db,
+            'DELETE FROM categories WHERE id = ?',
+            (category_id,),
+            param_types=['integer'],
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al eliminar categoría %s: %s", category_id, e)
+        return False
+
+
+# ====================== FUNCIONES DE INVOICES (READ-ONLY) ======================
+
+def get_all_invoices_paginated(limit: int, offset: int, estado: str | None = None, customer_id: int | None = None) -> list:
+    """Returns a page of invoices joined with customer name, optionally filtered."""
+    try:
+        db = get_db()
+        conditions = []
+        params: list = []
+        param_types: list = []
+
+        if estado is not None:
+            conditions.append('i.estado = ?')
+            params.append(estado)
+            param_types.append('text')
+        if customer_id is not None:
+            conditions.append('i.customer_id = ?')
+            params.append(customer_id)
+            param_types.append('integer')
+
+        where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+        params += [limit, offset]
+        param_types += ['integer', 'integer']
+
+        rows = _execute_db(
+            db,
+            f'''
+            SELECT i.id, i.fecha, i.estado, i.total,
+                   c.id AS customer_db_id, c.name AS customer_name, c.customer_id AS telegram_id
+            FROM invoices i
+            JOIN customers c ON i.customer_id = c.id
+            {where}
+            ORDER BY i.fecha DESC
+            LIMIT ? OFFSET ?
+            ''',
+            tuple(params),
+            fetchall=True,
+            param_types=param_types,
+        )
+        return rows or []
+    except DatabaseError as e:
+        logger.error("Error al listar invoices paginados: %s", e)
+        return []
+
+
+def count_all_invoices(estado: str | None = None, customer_id: int | None = None) -> int:
+    """Returns the total number of invoices, optionally filtered."""
+    try:
+        db = get_db()
+        conditions = []
+        params: list = []
+        param_types: list = []
+
+        if estado is not None:
+            conditions.append('estado = ?')
+            params.append(estado)
+            param_types.append('text')
+        if customer_id is not None:
+            conditions.append('customer_id = ?')
+            params.append(customer_id)
+            param_types.append('integer')
+
+        where = ('WHERE ' + ' AND '.join(conditions)) if conditions else ''
+        result = _execute_db(
+            db,
+            f'SELECT COUNT(*) AS total FROM invoices {where}',
+            tuple(params),
+            fetchone=True,
+            param_types=param_types or None,
+        )
+        return int(result['total']) if result else 0
+    except DatabaseError as e:
+        logger.error("Error al contar invoices: %s", e)
+        return 0
+
+
+def get_invoice_by_id_db(invoice_id: int) -> dict | None:
+    """Returns a single invoice row joined with customer, or None if not found."""
+    try:
+        db = get_db()
+        row = _execute_db(
+            db,
+            '''
+            SELECT i.id, i.fecha, i.estado, i.total,
+                   c.id AS customer_db_id, c.name AS customer_name, c.customer_id AS telegram_id
+            FROM invoices i
+            JOIN customers c ON i.customer_id = c.id
+            WHERE i.id = ?
+            ''',
+            (invoice_id,),
+            fetchone=True,
+            param_types=['integer'],
+        )
+        return row or None
+    except DatabaseError as e:
+        logger.error("Error al obtener invoice %s: %s", invoice_id, e)
+        return None
+
+
+def get_invoice_items_db(invoice_id: int) -> list:
+    """Returns all items of an invoice with product details."""
+    try:
+        db = get_db()
+        rows = _execute_db(
+            db,
+            '''
+            SELECT ii.id, ii.product_id, p.nombre AS product_name, p.descripcion AS product_description,
+                   ii.cantidad, ii.precio_unitario, ii.subtotal
+            FROM invoice_items ii
+            JOIN products p ON ii.product_id = p.id
+            WHERE ii.invoice_id = ?
+            ORDER BY p.nombre
+            ''',
+            (invoice_id,),
+            fetchall=True,
+            param_types=['integer'],
+        )
+        return rows or []
+    except DatabaseError as e:
+        logger.error("Error al obtener items de invoice %s: %s", invoice_id, e)
+        return []
+
+
+def get_customer_db_id_by_telegram_id(telegram_id: str) -> int | None:
+    """Returns the internal DB id of a customer given their Telegram customer_id, or None if not found."""
+    try:
+        db = get_db()
+        row = _execute_db(
+            db,
+            'SELECT id FROM customers WHERE customer_id = ?',
+            (telegram_id,),
+            fetchone=True,
+            param_types=['text'],
+        )
+        return int(row['id']) if row else None
+    except DatabaseError as e:
+        logger.error("Error al buscar customer por telegram_id '%s': %s", telegram_id, e)
+        return None
+
+
 def pago_ya_procesado(mp_payment_id: str) -> bool:
     """
     Verifica si un pago de Mercado Pago ya fue procesado (estado != 'pendiente').

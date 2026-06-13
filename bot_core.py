@@ -76,14 +76,13 @@ def init_database():
 
 
 # ==================== CREACIÓN DE LA APP TELEGRAM ====================
-def create_and_initialize_app(bot_token, bot_mode):
+def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
     """Crea e inicializa una Application de python-telegram-bot"""
     
     logger.info("🔄 Creando e inicializando Application...")
     
     if bot_mode == "POLLING":
-        logger.info("⚙️ Modo POLLING seleccionado")
-        init_database()  # Inicializamos la base de datos antes de crear la app
+        raise ValueError("Modo POLLING no permitido: este proyecto funciona solo con WEBHOOK")
 
     # 1. Crear la aplicación
     app = Application.builder().token(bot_token).build()
@@ -146,36 +145,23 @@ def create_and_initialize_app(bot_token, bot_mode):
     # Manejador de mensajes de texto (teclado principal)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mensajes_texto))
     
-    app.add_error_handler(error_handler)
+    #app.add_error_handler(error_handler)
+
+    if not initialize_app:
+        logger.info("Application creada sin initialize(); lifecycle externo")
+        return app
 
     # Creamos un event loop para inicializar
-    #loop = asyncio.new_event_loop()
-    #asyncio.set_event_loop(loop)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    if bot_mode == "POLLING":
-        logger.info("Iniciando bot en modo POLLING")
-        app.run_polling(drop_pending_updates=True) 
-    else:
-        # Creamos un event loop para inicializar
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        try:
-            loop.run_until_complete(app.initialize())
-            logger.info("✅ Application inicializada correctamente")
-            return app
-        except Exception as e:
-            logger.error(f"❌ Error inicializando Application: {e}")
-            raise
-        finally:
-            loop.close()
+    try:
+        loop.run_until_complete(app.initialize())
+        logger.info("✅ Application inicializada correctamente")
+        return app
+    except Exception as e:
+        logger.error(f"❌ Error inicializando Application: {e}")
+        raise
+    finally:
+        loop.close()
         
-
-if __name__ == "__main__":
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    TOKEN = os.getenv('BOT_TOKEN')
-    BOT_MODE = os.getenv('BOT_MODE', 'POLLING')
-
-    create_and_initialize_app(TOKEN, BOT_MODE)
