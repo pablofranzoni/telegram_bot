@@ -19,23 +19,30 @@ from utils.database import (
 )
 
 
-def _normalize_invoice_id(raw_invoice_id: Any) -> int | None:
+def _normalize_invoice_id(raw_invoice_id: Any) -> str | int | None:
     """Return a consistent invoice id from low-level DB results."""
     if raw_invoice_id is None:
         return None
-    if isinstance(raw_invoice_id, int):
+    if isinstance(raw_invoice_id, (int, str)):
         return raw_invoice_id
 
     value = get_record_value(raw_invoice_id, "id", fallback_index=0)
-    return int(value) if value is not None else None
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return value
+
+    return str(value)
 
 
-def get_current_cart_id(user_id: int) -> int | None:
+def get_current_cart_id(user_id: int) -> str | int | None:
     """Return the current pending cart/invoice id for a user."""
     return _normalize_invoice_id(obtener_pedido_actual(user_id))
 
 
-def get_cart_by_invoice(invoice_id: int) -> CartDTO | None:
+def get_cart_by_invoice(invoice_id: str | int) -> CartDTO | None:
     """Return a normalized cart view from an invoice id."""
     info, items = obtener_detalle_pedido(invoice_id)
     if not info:
@@ -199,7 +206,7 @@ def clear_cart(user_id: int) -> bool:
     return bool(vaciar_pedido_db(invoice_id))
 
 
-def remove_product_from_cart(invoice_id: int, product_id: int) -> CartMutationResult:
+def remove_product_from_cart(invoice_id: str | int, product_id: int) -> CartMutationResult:
     """Remove a product from a given invoice/cart."""
     product = get_product_by_id(product_id)
     previous_quantity = obtener_cantidad_producto(invoice_id, product_id)

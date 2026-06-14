@@ -14,7 +14,7 @@ from utils.database import (
 )
 
 
-def finalize_checkout(*, telegram_id: int, invoice_id: int) -> CheckoutResultDTO:
+def finalize_checkout(*, telegram_id: int, invoice_id: str) -> CheckoutResultDTO:
     """Finalize an order and generate a payment link for it."""
     customer = obtener_cliente(telegram_id)
     email = get_record_value(customer, "email")
@@ -35,7 +35,7 @@ def finalize_checkout(*, telegram_id: int, invoice_id: int) -> CheckoutResultDTO
         )
 
     amount = to_decimal(get_record_value(invoice_info, "total", Decimal("0.00")))
-    title = f"Pedido #{str(invoice_id).zfill(10)}"
+    title = f"Pedido #{invoice_id}"
 
     finalizar_pedido_db(invoice_id)
 

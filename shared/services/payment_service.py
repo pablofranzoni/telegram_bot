@@ -11,7 +11,7 @@ def create_payment_link(
     title: str,
     amount: Decimal,
     telegram_id: int,
-    invoice_id: int,
+    invoice_id: str,
     email: str | None,
     mp_client: MercadoPagoSimple | None = None,
 ) -> PaymentLinkResult:

@@ -20,7 +20,7 @@ class CheckoutResultDTO:
     """Represents the outcome of finalizing a checkout."""
 
     success: bool
-    invoice_id: int
+    invoice_id: str  # UUID como string
     amount: Decimal | None = None
     title: str | None = None
     payment_preference_id: str | None = None

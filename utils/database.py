@@ -9,6 +9,11 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+def _invoice_param_type(invoice_id):
+    """Return query param type for invoice id supporting both int and UUID/text."""
+    return 'text' if isinstance(invoice_id, str) else 'integer'
+
+
 def _execute_db(db, query, params=(), fetchone=False, fetchall=False, param_types=None):
     """Compat wrapper for db.execute across adapters with/without param_types."""
     try:
@@ -180,12 +185,13 @@ def crear_pedido(customer_id):
 def vaciar_pedido_db(invoice_id):
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         # Eliminar todos los items del pedido
         db.execute('DELETE FROM invoice_items WHERE invoice_id = ?', (invoice_id,), 
-                   param_types=['integer'])
+                   param_types=[invoice_id_type])
         # Actualizar total del pedido a 0
         db.execute('UPDATE invoices SET total = 0 WHERE id = ?', (invoice_id,), 
-                   param_types=['integer'])
+                   param_types=[invoice_id_type])
 
         return True
     
@@ -198,6 +204,7 @@ def agregar_producto(invoice_id, producto_id, cantidad):
     """Agrega un producto a un pedido"""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         
         # Obtener precio del producto
         product = db.execute('SELECT precio FROM products WHERE id = ?', 
@@ -211,7 +218,7 @@ def agregar_producto(invoice_id, producto_id, cantidad):
         item_existente = db.execute('''
             SELECT id, cantidad FROM invoice_items 
             WHERE invoice_id = ? AND product_id = ?
-        ''', (invoice_id, producto_id), fetchone=True, param_types=['integer', 'integer'])
+        ''', (invoice_id, producto_id), fetchone=True, param_types=[invoice_id_type, 'integer'])
         
         if item_existente:
             # Actualizar cantidad si ya existe
@@ -228,7 +235,7 @@ def agregar_producto(invoice_id, producto_id, cantidad):
                 INSERT INTO invoice_items (invoice_id, product_id, cantidad, precio_unitario)
                 VALUES (?, ?, ?, ?)
             ''', (invoice_id, producto_id, cantidad, precio_unitario), 
-            param_types=['integer', 'integer', 'integer', 'float'])
+            param_types=[invoice_id_type, 'integer', 'integer', 'float'])
 
         # Actualizar total del pedido
         db.execute('''
@@ -239,7 +246,7 @@ def agregar_producto(invoice_id, producto_id, cantidad):
                 WHERE invoice_id = ?
             )
             WHERE id = ?
-        ''', (invoice_id, invoice_id), param_types=['integer', 'integer'])
+        ''', (invoice_id, invoice_id), param_types=[invoice_id_type, invoice_id_type])
         
         return True
     
@@ -293,13 +300,14 @@ def obtener_detalle_pedido(invoice_id):
     """Obtiene el detalle completo de un invoice"""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         # Información del pedido
         info_pedido = db.execute('''
             SELECT p.id, p.fecha, p.estado, p.total, c.name
             FROM invoices p
             JOIN customers c ON p.customer_id = c.id
             WHERE p.id = ?
-        ''', (invoice_id,), fetchone=True, param_types=['integer'])
+        ''', (invoice_id,), fetchone=True, param_types=[invoice_id_type])
         # Items del pedido
         items: list | None = db.execute('''
             SELECT pr.id, pr.nombre, pi.cantidad, pi.precio_unitario, 
@@ -308,7 +316,7 @@ def obtener_detalle_pedido(invoice_id):
             JOIN products pr ON pi.product_id = pr.id
             WHERE pi.invoice_id = ?
             ORDER BY pr.nombre
-        ''', (invoice_id,), fetchall=True, param_types=['integer'])
+        ''', (invoice_id,), fetchall=True, param_types=[invoice_id_type])
        
         return info_pedido, items
     
@@ -321,6 +329,7 @@ def obtener_comprobante_pedido(invoice_id):
     """Obtiene los datos necesarios para generar un comprobante PDF."""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         info_pedido = db.execute('''
             SELECT i.id, i.fecha, i.estado, i.total,
                    c.name, c.email, c.address, c.company, c.customer_id,
@@ -332,7 +341,7 @@ def obtener_comprobante_pedido(invoice_id):
             WHERE i.id = ?
             ORDER BY p.fecha_creacion DESC
             LIMIT 1
-        ''', (invoice_id,), fetchone=True, param_types=['integer'])
+        ''', (invoice_id,), fetchone=True, param_types=[invoice_id_type])
 
         items: list | None = db.execute('''
             SELECT pr.id, pr.nombre, pr.descripcion, pi.cantidad,
@@ -341,7 +350,7 @@ def obtener_comprobante_pedido(invoice_id):
             JOIN products pr ON pi.product_id = pr.id
             WHERE pi.invoice_id = ?
             ORDER BY pr.nombre
-        ''', (invoice_id,), fetchall=True, param_types=['integer'])
+        ''', (invoice_id,), fetchall=True, param_types=[invoice_id_type])
 
         return info_pedido, items or []
 
@@ -357,11 +366,12 @@ def quitar_producto_del_pedido(invoice_id, producto_id):
     """
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         # 1. Eliminar el item
         db.execute('''
             DELETE FROM invoice_items 
             WHERE invoice_id = ? AND product_id = ?
-            ''', (invoice_id, producto_id), param_types=['integer', 'integer'])
+            ''', (invoice_id, producto_id), param_types=[invoice_id_type, 'integer'])
         logger.info("Producto eliminado del pedido", extra={"invoice_id": invoice_id, "producto_id": producto_id})
         # 2. Actualizar total del invoice
         db.execute('''
@@ -372,7 +382,7 @@ def quitar_producto_del_pedido(invoice_id, producto_id):
                 WHERE invoice_id = ?
             ), 0)
             WHERE id = ?
-            ''', (invoice_id, invoice_id), param_types=['integer', 'integer'])
+            ''', (invoice_id, invoice_id), param_types=[invoice_id_type, invoice_id_type])
         logger.debug("Total de pedido actualizado tras eliminar producto", extra={"invoice_id": invoice_id, "producto_id": producto_id})
         
         # 3. Verificar si el invoice quedó vacío
@@ -382,7 +392,7 @@ def quitar_producto_del_pedido(invoice_id, producto_id):
         #si el count es 0, eliminar el invoice para evitar pedidos vacíos
         #if count is not None:
         db.execute('DELETE FROM invoices WHERE id = ? AND (SELECT COUNT(*) FROM invoice_items WHERE invoice_id = ?) = 0',
-                       (invoice_id, invoice_id), param_types=['integer', 'integer'])
+                       (invoice_id, invoice_id), param_types=[invoice_id_type, invoice_id_type])
             
         #if count['cant_items'] == 0:
             # Eliminar invoice vacío
@@ -407,6 +417,7 @@ def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
     
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         
         # 1. Actualizar cantidad
         db.execute('''
@@ -414,7 +425,7 @@ def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
             SET cantidad = ? 
             WHERE invoice_id = ? AND product_id = ?
         ''', (nueva_cantidad, invoice_id, producto_id), 
-        param_types=['integer', 'integer', 'integer'])
+        param_types=['integer', invoice_id_type, 'integer'])
         
         # 2. Actualizar precio unitario (por si cambió)
         db.execute('''
@@ -423,7 +434,7 @@ def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
                 SELECT precio FROM products WHERE id = ?
             )
             WHERE invoice_id = ? AND product_id = ?
-        ''', (producto_id, invoice_id, producto_id), param_types=['integer', 'integer', 'integer'])
+        ''', (producto_id, invoice_id, producto_id), param_types=['integer', invoice_id_type, 'integer'])
         
         # 3. Actualizar total del invoice
         db.execute('''
@@ -434,7 +445,7 @@ def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
                 WHERE invoice_id = ?
             )
             WHERE id = ?
-        ''', (invoice_id, invoice_id), param_types=['integer', 'integer'])
+        ''', (invoice_id, invoice_id), param_types=[invoice_id_type, invoice_id_type])
         
         return True
     except DatabaseError as e:
@@ -478,10 +489,11 @@ def obtener_cantidad_producto(invoice_id, producto_id):
     """Obtiene la cantidad actual de un producto en un invoice"""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         resultado = db.execute('''
             SELECT cantidad FROM invoice_items 
             WHERE invoice_id = ? AND product_id = ?
-        ''', (invoice_id, producto_id), fetchone=True, param_types=['integer', 'integer'])
+        ''', (invoice_id, producto_id), fetchone=True, param_types=[invoice_id_type, 'integer'])
         return resultado['cantidad'] if resultado else None
     
     except DatabaseError as e:
@@ -493,11 +505,12 @@ def finalizar_pedido_db(invoice_id):
     """Marca un invoice como completado"""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         db.execute('''
             UPDATE invoices 
             SET estado = 'completado' 
             WHERE id = ?
-        ''', (invoice_id,), param_types=['integer'])
+        ''', (invoice_id,), param_types=[invoice_id_type])
         
     except DatabaseError as e:
         logger.error("Error al finalizar invoice %s: %s", invoice_id, e)
@@ -509,11 +522,12 @@ def guardar_pago(telegram_id, mp_payment_id, invoice_id, monto, concepto, estado
     """Guarda el pago en base de datos"""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         pago_id = db.execute('''
             INSERT INTO payments (telegram_id, mp_payment_id, invoice_id, monto, concepto, estado)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (telegram_id, mp_payment_id, invoice_id, monto, concepto, estado), 
-            param_types=['integer', 'string', 'integer', 'float', 'string', 'string'])
+            param_types=['integer', 'string', invoice_id_type, 'float', 'string', 'string'])
         logger.info(
             "Pago guardado en BD",
             extra={"telegram_id": telegram_id, "invoice_id": invoice_id, "mp_payment_id": mp_payment_id, "estado": estado},
@@ -529,12 +543,13 @@ def actualizar_pago(payment_id, invoice_id, estado, monto, fecha_aprobacion=None
     """Actualiza el estado del pago en nuestra BD"""
     try:
         db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
         updated_rows = db.execute('''
             UPDATE payments 
             SET estado = ?, fecha_aprobacion = ?, mp_payment_id = ?
             WHERE invoice_id = ? AND monto = ?
         ''', (estado, fecha_aprobacion, payment_id, invoice_id, monto), 
-            param_types=['string', 'datetime', 'string', 'integer', 'float'])
+            param_types=['string', 'datetime', 'string', invoice_id_type, 'float'])
 
         if isinstance(updated_rows, int) and updated_rows == 0:
             logger.warning(

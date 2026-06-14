@@ -89,6 +89,7 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
     logger.info("✅ Application creada")
     
     app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler("mi_pedido", ver_pedido))
 
     products_conv_handler = ConversationHandler(
         entry_points=[

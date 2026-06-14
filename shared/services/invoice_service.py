@@ -21,7 +21,7 @@ from utils.database import (
 class InvoiceItemDTO:
     """Represents a single line item inside an invoice."""
 
-    id: int
+    id: str  # Cambiar de int a str (UUID)
     product_id: int
     product_name: str
     product_description: str
@@ -34,7 +34,7 @@ class InvoiceItemDTO:
 class InvoiceDTO:
     """Represents an invoice header."""
 
-    id: int
+    id: str  # Cambiar de int a str (UUID)
     fecha: str
     estado: str
     total: Decimal
@@ -46,7 +46,7 @@ class InvoiceDTO:
 def _row_to_invoice_dto(row: dict) -> InvoiceDTO:
     """Converts a DB row to an InvoiceDTO."""
     return InvoiceDTO(
-        id=int(get_record_value(row, "id", fallback_index=0)),
+        id=str(get_record_value(row, "id", fallback_index=0)),
         fecha=str(get_record_value(row, "fecha", fallback_index=1) or ""),
         estado=str(get_record_value(row, "estado", fallback_index=2) or ""),
         total=Decimal(str(get_record_value(row, "total", fallback_index=3) or 0)),
@@ -59,7 +59,7 @@ def _row_to_invoice_dto(row: dict) -> InvoiceDTO:
 def _row_to_item_dto(row: dict) -> InvoiceItemDTO:
     """Converts a DB row to an InvoiceItemDTO."""
     return InvoiceItemDTO(
-        id=int(get_record_value(row, "id", fallback_index=0)),
+        id=str(get_record_value(row, "id", fallback_index=0)),
         product_id=int(get_record_value(row, "product_id", fallback_index=1) or 0),
         product_name=str(get_record_value(row, "product_name", fallback_index=2) or ""),
         product_description=str(get_record_value(row, "product_description", fallback_index=3) or ""),
@@ -95,7 +95,7 @@ def list_invoices(
     return [_row_to_invoice_dto(row) for row in rows], total
 
 
-def get_invoice(invoice_id: int) -> InvoiceDTO | None:
+def get_invoice(invoice_id: str) -> InvoiceDTO | None:
     """Returns a single invoice by id, or None if not found."""
     row = get_invoice_by_id_db(invoice_id)
     if not row:
@@ -103,7 +103,7 @@ def get_invoice(invoice_id: int) -> InvoiceDTO | None:
     return _row_to_invoice_dto(row)
 
 
-def get_invoice_items(invoice_id: int) -> list[InvoiceItemDTO]:
+def get_invoice_items(invoice_id: str) -> list[InvoiceItemDTO]:
     """Returns all line items of an invoice.
 
     Args:

@@ -22,7 +22,7 @@ class CartItemDTO:
 class CartDTO:
     """Represents the current cart state for a user or invoice."""
 
-    invoice_id: int
+    invoice_id: str  # UUID
     items: list[CartItemDTO] = field(default_factory=list)
     total: Decimal = Decimal("0.00")
     item_count: int = 0
@@ -39,7 +39,7 @@ class CartMutationResult:
 
     success: bool
     product: ProductDTO | None = None
-    invoice_id: int | None = None
+    invoice_id: str | None = None # UUID
     previous_quantity: int | None = None
     current_quantity: int | None = None
     error_message: str | None = None

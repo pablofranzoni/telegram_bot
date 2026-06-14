@@ -10,6 +10,7 @@ from typing import cast
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 from shared.handlers.products import obtener_categorias
 from shared.services.cart_service import (
@@ -46,6 +47,57 @@ def _get_accessible_message(update: Update) -> Message | None:
     if callback_query and isinstance(callback_query.message, Message):
         return callback_query.message
     return None
+
+
+def _parse_invoice_id(raw_invoice_id: str) -> str | int:
+    """Parse callback invoice ids preserving int ids and UUID/text ids."""
+    return int(raw_invoice_id) if raw_invoice_id.isdigit() else raw_invoice_id
+
+
+async def _safe_edit_callback_message(
+    query: CallbackQuery,
+    text: str,
+    *,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
+) -> None:
+    """Edit callback message and gracefully fallback when Telegram rejects the edit."""
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+    except BadRequest as exc:
+        error_text = str(exc).lower()
+
+        # Telegram raises this when the new message equals the current one.
+        if "message is not modified" in error_text:
+            logger.debug("Skipping edit_message_text because message did not change")
+            return
+
+        # Some callback origins are not editable (or no longer exist); send a new message instead.
+        if (
+            "message can't be edited" in error_text
+            or "message to edit not found" in error_text
+        ) and isinstance(query.message, Message):
+            await query.message.reply_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            return
+
+        logger.exception("Unexpected telegram BadRequest while editing callback message")
+        raise
+
+
+async def _safe_answer_callback(query: CallbackQuery, text: str | None = None) -> None:
+    """Answer callback queries without breaking flows when already answered."""
+    try:
+        await query.answer(text)
+    except BadRequest:
+        logger.debug("Skipping callback answer because it was already answered or expired")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
@@ -136,6 +188,15 @@ async def agregar_y_salir_flujo_productos(update: Update, context: ContextTypes.
     ):
         user_data.pop(key, None)
 
+    guidance_message = (
+        "✅ Producto agregado al pedido.\n\n"
+        "Para seguir comprando, usa /ver_productos.\n"
+        "Para revisar el carrito, usa Mi Pedido o /mi_pedido."
+    )
+    reply_message = getattr(query, "message", None)
+    if isinstance(reply_message, Message):
+        await reply_message.reply_text(guidance_message)
+
     return ConversationHandler.END
 
 
@@ -196,12 +257,16 @@ async def aumentar_cantidad(query: CallbackQuery, context: ContextTypes.DEFAULT_
     result = increase_product_quantity(usuario_id, producto_id, cantidad)
 
     if result.success and result.product:
-        await query.edit_message_text(
-            f"➕ {result.product.name}: {result.previous_quantity} → {result.current_quantity}"
+        await _safe_edit_callback_message(
+            query,
+            f"➕ {result.product.name}: {result.previous_quantity} → {result.current_quantity}",
         )
         return
 
-    await query.edit_message_text(result.error_message or "❌ Error al actualizar cantidad")
+    await _safe_edit_callback_message(
+        query,
+        result.error_message or "❌ Error al actualizar cantidad",
+    )
 
 
 async def agregar_producto_al_pedido(query: CallbackQuery, producto_id: int, cantidad: int = 1):
@@ -213,7 +278,10 @@ async def agregar_producto_al_pedido(query: CallbackQuery, producto_id: int, can
     result = add_product_to_cart(usuario_id, producto_id, cantidad)
 
     if result.success and result.product:
-        await query.edit_message_text(text=f"➕ {result.product.name}: {result.current_quantity}")
+        await _safe_edit_callback_message(
+            query,
+            f"➕ {result.product.name}: {result.current_quantity}",
+        )
         return
 
     await query.answer(result.error_message or "❌ Error al agregar producto")
@@ -293,7 +361,7 @@ async def mostrar_confirmacion_eliminar(query: CallbackQuery, producto_id: int, 
     )
 
 
-async def mostrar_confirmacion_finalizar_carrito(query: CallbackQuery, pedido_id: int):
+async def mostrar_confirmacion_finalizar_carrito(query: CallbackQuery, pedido_id: str | int):
     """Muestra diálogo de confirmación antes de finalizar el pedido."""
     cart = get_cart_by_invoice(pedido_id)
     if not cart or cart.is_empty:
@@ -340,7 +408,7 @@ async def ejecutar_eliminacion(
     context: ContextTypes.DEFAULT_TYPE,
     producto_id: int,
     producto_nombre: str,
-    pedido_id: int,
+    pedido_id: str | int,
     usuario_id: int,
 ):
     """Ejecuta la eliminación del producto."""
@@ -348,7 +416,7 @@ async def ejecutar_eliminacion(
         eliminado = remove_product_from_cart(pedido_id, producto_id)
 
         if eliminado.success:
-            await query.answer(f"✅ {producto_nombre} eliminado")
+            await _safe_answer_callback(query, f"✅ {producto_nombre} eliminado")
             pedido_actual = get_current_cart(usuario_id)
 
             if not pedido_actual:
@@ -357,17 +425,19 @@ async def ejecutar_eliminacion(
                     parse_mode='Markdown',
                 )
             else:
-                #await actualizar_vista_pedido(query, context, usuario_id)
-                await query.answer("❌ Se actualizó el pedido.")
+                await actualizar_vista_pedido(query, context, usuario_id)
         else:
-            await query.answer(eliminado.error_message or "❌ Error al eliminar el producto")
+            await _safe_answer_callback(
+                query,
+                eliminado.error_message or "❌ Error al eliminar el producto",
+            )
 
     except Exception as e:
         logger.exception(
             "Error eliminando producto del carrito",
             extra={"usuario_id": usuario_id, "pedido_id": pedido_id, "producto_id": producto_id},
         )
-        await query.answer("❌ Error interno al eliminar")
+        await _safe_answer_callback(query, "❌ Error interno al eliminar")
 
 
 async def ejecutar_finalizar_pedido(update, context):
@@ -381,7 +451,7 @@ async def ejecutar_finalizar_pedido(update, context):
     telegram_id = query.from_user.id
 
     if 'confirm_finalize_' in query.data:
-        invoice_id = int(query.data.replace('confirm_finalize_', ''))
+        invoice_id = _parse_invoice_id(query.data.replace('confirm_finalize_', '', 1))
 
         try:
             resultado = finalize_checkout(
@@ -512,10 +582,10 @@ async def manejar_confirmacion_eliminar(update: Update, context: ContextTypes.DE
     data = query.data
 
     if data.startswith('confirm_del_'):
-        partes = data.replace('confirm_del_', '').split('_')
+        partes = data.replace('confirm_del_', '', 1).split('_', 1)
         if len(partes) >= 2:
             producto_id = int(partes[0])
-            pedido_id = int(partes[1])
+            pedido_id = _parse_invoice_id(partes[1])
             usuario_id = query.from_user.id
             producto_info = get_product_by_id(producto_id)
 
@@ -615,7 +685,7 @@ async def finalizar_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
 
-    pedido_id = int(query.data.replace('finalizar_', ''))
+    pedido_id = _parse_invoice_id(query.data.replace('finalizar_', '', 1))
     await mostrar_confirmacion_finalizar_carrito(query, pedido_id)
 
 
