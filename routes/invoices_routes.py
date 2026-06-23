@@ -9,6 +9,7 @@ import math
 from flask import Blueprint, jsonify, request
 
 from shared.services import invoice_service
+from shared.decorators import api_token_required
 
 invoices_bp = Blueprint("invoices", __name__)
 
@@ -45,6 +46,7 @@ def _item_to_dict(dto) -> dict:
 #  GET /api/invoices
 # --------------------------------------------------------------------------- #
 @invoices_bp.route("/invoices", methods=["GET"])
+@api_token_required
 def list_invoices():
     """Returns a paginated list of invoices.
 
@@ -97,6 +99,7 @@ def list_invoices():
 #  GET /api/invoices/<id>
 # --------------------------------------------------------------------------- #
 @invoices_bp.route("/invoices/<int:invoice_id>", methods=["GET"])
+@api_token_required
 def get_invoice(invoice_id: int):
     """Returns a single invoice by id, including its line items."""
     invoice = invoice_service.get_invoice(invoice_id)
@@ -113,6 +116,7 @@ def get_invoice(invoice_id: int):
 #  GET /api/invoices/<id>/items
 # --------------------------------------------------------------------------- #
 @invoices_bp.route("/invoices/<int:invoice_id>/items", methods=["GET"])
+@api_token_required
 def get_invoice_items(invoice_id: int):
     """Returns only the line items of an invoice."""
     invoice = invoice_service.get_invoice(invoice_id)
@@ -130,6 +134,7 @@ def get_invoice_items(invoice_id: int):
 #  GET /api/invoices/by-customer/<telegram_id>
 # --------------------------------------------------------------------------- #
 @invoices_bp.route("/invoices/by-customer/<telegram_id>", methods=["GET"])
+@api_token_required
 def list_invoices_by_customer(telegram_id: str):
     """Returns paginated invoices belonging to a customer identified by their Telegram id.
 

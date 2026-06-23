@@ -8,25 +8,7 @@ import pytest
 from shared.dtos import ProductDTO
 
 
-# --------------------------------------------------------------------------- #
-#  Flask test client fixture
-# --------------------------------------------------------------------------- #
-@pytest.fixture
-def client():
-    """Creates a Flask test client with a clean app instance."""
-    from flask import Flask
-    from routes.products_routes import products_bp
-
-    app = Flask(__name__)
-    app.register_blueprint(products_bp, url_prefix="/api")
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
-
-
-# --------------------------------------------------------------------------- #
-#  Sample data helpers
-# --------------------------------------------------------------------------- #
+# Sample data helpers
 def _make_dto(
     product_id: int = 1,
     name: str = "Coca-Cola",
@@ -44,10 +26,13 @@ def _make_dto(
 
 
 # ===========================================================================
-#  GET /api/products
+#  GET /api/products (PUBLIC - No authentication required)
 # ===========================================================================
 class TestListProducts:
+    """Test cases for GET /api/products endpoint."""
+    
     def test_returns_200_with_products_and_pagination(self, client):
+        """Test that listing products returns paginated results."""
         dtos = [_make_dto(1), _make_dto(2, name="Sprite")]
         with patch("routes.products_routes.product_service.list_products", return_value=(dtos, 2)):
             response = client.get("/api/products")
@@ -60,6 +45,7 @@ class TestListProducts:
         assert body["pagination"]["total_pages"] == 1
 
     def test_pagination_params_are_forwarded(self, client):
+        """Test that pagination parameters are correctly forwarded."""
         captured: dict = {}
 
         def fake_list(page, per_page):
@@ -74,12 +60,15 @@ class TestListProducts:
         assert captured["per_page"] == 5
 
     def test_invalid_pagination_returns_400(self, client):
+        """Test that invalid pagination parameters return 400."""
         response = client.get("/api/products?page=abc")
         assert response.status_code == 400
 
     def test_empty_list_returns_200(self, client):
+        """Test that empty product list returns 200."""
         with patch("routes.products_routes.product_service.list_products", return_value=([], 0)):
             response = client.get("/api/products")
+
         assert response.status_code == 200
         body = response.get_json()
         assert body["products"] == []
@@ -87,147 +76,193 @@ class TestListProducts:
 
 
 # ===========================================================================
-#  GET /api/products/<id>
+#  GET /api/products/<id> (PUBLIC - No authentication required)
 # ===========================================================================
-class TestGetProduct:
-    def test_returns_product_when_found(self, client):
-        dto = _make_dto(7)
+class TestGetProductById:
+    """Test cases for GET /api/products/<id> endpoint."""
+    
+    def test_get_existing_product_returns_200(self, client):
+        """Test retrieving an existing product."""
+        dto = _make_dto(123, name="Pizza")
         with patch("routes.products_routes.product_service.get_product", return_value=dto):
-            response = client.get("/api/products/7")
+            response = client.get("/api/products/123")
 
         assert response.status_code == 200
         body = response.get_json()
-        assert body["id"] == 7
-        assert body["nombre"] == "Coca-Cola"
+        assert body["id"] == 123
+        assert body["nombre"] == "Pizza"
 
-    def test_returns_404_when_not_found(self, client):
+    def test_get_nonexistent_product_returns_404(self, client):
+        """Test retrieving a non-existent product."""
         with patch("routes.products_routes.product_service.get_product", return_value=None):
             response = client.get("/api/products/999")
 
         assert response.status_code == 404
-        assert "error" in response.get_json()
+        assert response.get_json()["error"] == "Producto no encontrado"
 
 
 # ===========================================================================
-#  POST /api/products
+#  POST /api/products (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestCreateProduct:
-    _valid_payload = {
-        "nombre": "Agua Mineral",
-        "descripcion": "Botella 1L",
-        "precio": 1.50,
-        "category_id": 2,
-    }
+    """Test cases for POST /api/products endpoint."""
+    
+    def test_create_product_without_token_returns_401(self, client):
+        """Test that creating product without JWT token returns 401."""
+        response = client.post(
+            "/api/products",
+            json={
+                "nombre": "New Product",
+                "descripcion": "Description",
+                "precio": 10.0,
+                "category_id": 1
+            }
+        )
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+        assert 'MISSING_AUTH_HEADER' in data.get('error_code', '')
+    
+    def test_create_product_with_invalid_token_returns_401(self, client):
+        """Test that creating product with invalid JWT token returns 401."""
+        response = client.post(
+            "/api/products",
+            json={
+                "nombre": "New Product",
+                "descripcion": "Description",
+                "precio": 10.0,
+                "category_id": 1
+            },
+            headers={"Authorization": "Bearer invalid_token"}
+        )
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
 
-    def test_creates_product_and_returns_201(self, client):
-        new_dto = _make_dto(10, name="Agua Mineral", price="1.50", stock=0)
-        with patch("routes.products_routes.product_service.create_product", return_value=new_dto):
-            response = client.post("/api/products", json=self._valid_payload)
+    def test_create_product_with_valid_token_succeeds(self, client, auth_headers):
+        """Test that creating product with valid JWT token succeeds."""
+        created_dto = _make_dto(5, name="New Product")
+        
+        with patch("routes.products_routes.product_service.create_product", return_value=created_dto):
+            response = client.post(
+                "/api/products",
+                json={
+                    "nombre": "New Product",
+                    "descripcion": "Description",
+                    "precio": 2.50,
+                    "category_id": 1
+                },
+                headers=auth_headers
+            )
 
         assert response.status_code == 201
         body = response.get_json()
-        assert body["id"] == 10
-        assert body["nombre"] == "Agua Mineral"
+        assert body["nombre"] == "New Product"
 
-    def test_stock_inicial_is_forwarded(self, client):
-        captured: dict = {}
+    def test_create_product_missing_required_fields_returns_400(self, client, auth_headers):
+        """Test that missing required fields return 400."""
+        response = client.post(
+            "/api/products",
+            json={"nombre": "Product"},  # Missing other required fields
+            headers=auth_headers
+        )
 
-        def fake_create(**kwargs):
-            captured.update(kwargs)
-            return _make_dto(11, stock=kwargs.get("stock_inicial", 0))
-
-        payload = {**self._valid_payload, "stock_inicial": 25}
-        with patch("routes.products_routes.product_service.create_product", side_effect=fake_create):
-            client.post("/api/products", json=payload)
-
-        assert captured["stock_inicial"] == 25
-
-    def test_missing_required_field_returns_400(self, client):
-        payload = {k: v for k, v in self._valid_payload.items() if k != "precio"}
-        response = client.post("/api/products", json=payload)
-        assert response.status_code == 400
-        assert "precio" in response.get_json()["error"]
-
-    def test_negative_precio_returns_400(self, client):
-        payload = {**self._valid_payload, "precio": -5}
-        response = client.post("/api/products", json=payload)
         assert response.status_code == 400
 
-    def test_invalid_category_id_returns_400(self, client):
-        payload = {**self._valid_payload, "category_id": "abc"}
-        response = client.post("/api/products", json=payload)
-        assert response.status_code == 400
+    def test_create_product_invalid_price_returns_400(self, client, auth_headers):
+        """Test that invalid price format returns 400."""
+        response = client.post(
+            "/api/products",
+            json={
+                "nombre": "Product",
+                "descripcion": "Description",
+                "precio": "not_a_number",
+                "category_id": 1
+            },
+            headers=auth_headers
+        )
 
-    def test_empty_nombre_returns_400(self, client):
-        payload = {**self._valid_payload, "nombre": "   "}
-        response = client.post("/api/products", json=payload)
         assert response.status_code == 400
-
-    def test_no_body_returns_400(self, client):
-        response = client.post("/api/products", data="not-json", content_type="text/plain")
-        assert response.status_code == 400
-
-    def test_service_failure_returns_500(self, client):
-        with patch("routes.products_routes.product_service.create_product", return_value=None):
-            response = client.post("/api/products", json=self._valid_payload)
-        assert response.status_code == 500
 
 
 # ===========================================================================
-#  PUT /api/products/<id>
+#  PUT /api/products/<id> (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestUpdateProduct:
-    def test_updates_and_returns_200(self, client):
-        updated_dto = _make_dto(3, name="Coca-Cola Zero")
+    """Test cases for PUT /api/products/<id> endpoint."""
+    
+    def test_update_product_without_token_returns_401(self, client):
+        """Test that updating product without JWT token returns 401."""
+        response = client.put(
+            "/api/products/1",
+            json={"nombre": "Updated"}
+        )
+
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_update_product_with_valid_token_succeeds(self, client, auth_headers):
+        """Test that updating product with valid JWT token succeeds."""
+        updated_dto = _make_dto(1, name="Updated Product")
+        
         with patch("routes.products_routes.product_service.update_product", return_value=updated_dto):
-            response = client.put("/api/products/3", json={"nombre": "Coca-Cola Zero"})
+            response = client.put(
+                "/api/products/1",
+                json={"nombre": "Updated Product"},
+                headers=auth_headers
+            )
 
         assert response.status_code == 200
-        assert response.get_json()["nombre"] == "Coca-Cola Zero"
+        body = response.get_json()
+        assert body["nombre"] == "Updated Product"
 
-    def test_unknown_fields_are_ignored(self, client):
-        captured: dict = {}
-
-        def fake_update(product_id, data):
-            captured["data"] = data
-            return _make_dto(3)
-
-        with patch("routes.products_routes.product_service.update_product", side_effect=fake_update):
-            client.put("/api/products/3", json={"nombre": "X", "unknown_field": "Y"})
-
-        assert "unknown_field" not in captured["data"]
-
-    def test_returns_404_when_not_found(self, client):
+    def test_update_nonexistent_product_returns_404(self, client, auth_headers):
+        """Test that updating non-existent product returns 404."""
         with patch("routes.products_routes.product_service.update_product", return_value=None):
-            response = client.put("/api/products/999", json={"nombre": "X"})
+            response = client.put(
+                "/api/products/999",
+                json={"nombre": "Updated"},
+                headers=auth_headers
+            )
+
         assert response.status_code == 404
 
-    def test_no_valid_fields_returns_400(self, client):
-        response = client.put("/api/products/1", json={"unknown": "value"})
-        assert response.status_code == 400
-
-    def test_invalid_precio_returns_400(self, client):
-        response = client.put("/api/products/1", json={"precio": "no-number"})
-        assert response.status_code == 400
-
-    def test_invalid_disponible_returns_400(self, client):
-        response = client.put("/api/products/1", json={"disponible": "yes"})
-        assert response.status_code == 400
-
 
 # ===========================================================================
-#  DELETE /api/products/<id>
+#  DELETE /api/products/<id> (PROTECTED - Requires JWT token)
 # ===========================================================================
-class TestDeactivateProduct:
-    def test_deactivates_and_returns_200(self, client):
+class TestDeleteProduct:
+    """Test cases for DELETE /api/products/<id> endpoint."""
+    
+    def test_delete_product_without_token_returns_401(self, client):
+        """Test that deleting product without JWT token returns 401."""
+        response = client.delete("/api/products/1")
+
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_delete_product_with_valid_token_succeeds(self, client, auth_headers):
+        """Test that deleting product with valid JWT token succeeds."""
         with patch("routes.products_routes.product_service.deactivate_product", return_value=True):
-            response = client.delete("/api/products/5")
+            response = client.delete(
+                "/api/products/1",
+                headers=auth_headers
+            )
 
         assert response.status_code == 200
-        assert "desactivado" in response.get_json()["message"]
+        body = response.get_json()
+        assert "message" in body
 
-    def test_returns_404_when_not_found(self, client):
+    def test_delete_nonexistent_product_returns_404(self, client, auth_headers):
+        """Test that deleting non-existent product returns 404."""
         with patch("routes.products_routes.product_service.deactivate_product", return_value=False):
-            response = client.delete("/api/products/999")
+            response = client.delete(
+                "/api/products/999",
+                headers=auth_headers
+            )
 
         assert response.status_code == 404

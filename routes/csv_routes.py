@@ -5,6 +5,7 @@ import tempfile
 import logging
 from datetime import datetime
 from database.db_sqlite import get_db
+from shared.decorators import api_token_required
 
 logger = logging.getLogger(__name__)
 csv_bp = Blueprint('csv', __name__)
@@ -19,6 +20,7 @@ def upload_form():
     return render_template('upload.html')
 
 @csv_bp.route('/upload', methods=['POST'])
+@api_token_required
 def upload_csv():
     """Endpoint para subir CSV"""
     try:
@@ -138,6 +140,7 @@ def process_csv_file(filepath, upload_id):
     return processed_rows
 
 @csv_bp.route('/uploads', methods=['GET'])
+@api_token_required
 def list_uploads():
     """Listar todos los uploads"""
     db = get_db()
@@ -163,6 +166,7 @@ def list_uploads():
     return jsonify({'uploads': result})
 
 @csv_bp.route('/customers', methods=['GET'])
+@api_token_required
 def list_customers():
     """Listar clientes"""
     db = get_db()
@@ -206,6 +210,7 @@ def list_customers():
     })
 
 @csv_bp.route('/stats', methods=['GET'])
+@api_token_required
 def get_stats():
     """Obtener estadísticas"""
     db = get_db()
@@ -249,6 +254,7 @@ def get_stats():
     })
 
 @csv_bp.route('/load_categories', methods=['GET', 'POST'])
+@api_token_required
 def load_categories():
     """Endpoint para cargar categorías (simulado)"""
     # Aquí iría la lógica para cargar categorías
@@ -261,6 +267,7 @@ def load_categories():
 
 
 @csv_bp.route('/load_products', methods=['GET', 'POST'])
+@api_token_required
 def load_products():
     #form = UploadForm()
     #if form.validate_on_submit():

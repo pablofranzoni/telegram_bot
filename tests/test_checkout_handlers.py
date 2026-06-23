@@ -9,6 +9,8 @@ from telegram.ext import ConversationHandler
 
 from shared.handlers import cart
 
+TEST_INVOICE_ID = "550e8400-e29b-41d4-a716-446655440000"
+
 
 def _build_query(data: str, user_id: int = 123) -> SimpleNamespace:
     return SimpleNamespace(
@@ -25,7 +27,7 @@ def _build_context(user_data: dict[str, object] | None = None) -> SimpleNamespac
 
 @pytest.mark.asyncio
 async def test_finalizar_pedido_delegates_to_confirmation(monkeypatch):
-    query = _build_query("finalizar_42")
+    query = _build_query(f"finalizar_{TEST_INVOICE_ID}")
     update = SimpleNamespace(callback_query=query)
     context = _build_context()
 
@@ -40,16 +42,16 @@ async def test_finalizar_pedido_delegates_to_confirmation(monkeypatch):
     await cart.finalizar_pedido(update, context)
 
     query.answer.assert_awaited_once()
-    assert captured == {"query": query, "pedido_id": 42}
+    assert captured == {"query": query, "pedido_id": TEST_INVOICE_ID}
 
 
 @pytest.mark.asyncio
 async def test_mostrar_confirmacion_finalizar_carrito_shows_empty_message_when_cart_missing(monkeypatch):
-    query = _build_query("finalizar_42")
+    query = _build_query(f"finalizar_{TEST_INVOICE_ID}")
 
     monkeypatch.setattr(cart, "get_cart_by_invoice", lambda pedido_id: None)
 
-    await cart.mostrar_confirmacion_finalizar_carrito(query, 42)
+    await cart.mostrar_confirmacion_finalizar_carrito(query, TEST_INVOICE_ID)
 
     query.edit_message_text.assert_awaited_once()
     args, kwargs = query.edit_message_text.await_args
@@ -59,7 +61,7 @@ async def test_mostrar_confirmacion_finalizar_carrito_shows_empty_message_when_c
 
 @pytest.mark.asyncio
 async def test_mostrar_confirmacion_finalizar_carrito_renders_summary(monkeypatch):
-    query = _build_query("finalizar_42")
+    query = _build_query(f"finalizar_{TEST_INVOICE_ID}")
     cart_dto = SimpleNamespace(
         is_empty=False,
         total=Decimal("25.50"),
@@ -76,7 +78,7 @@ async def test_mostrar_confirmacion_finalizar_carrito_renders_summary(monkeypatc
 
     monkeypatch.setattr(cart, "get_cart_by_invoice", lambda pedido_id: cart_dto)
 
-    await cart.mostrar_confirmacion_finalizar_carrito(query, 42)
+    await cart.mostrar_confirmacion_finalizar_carrito(query, TEST_INVOICE_ID)
 
     query.edit_message_text.assert_awaited_once()
     args, kwargs = query.edit_message_text.await_args
@@ -89,7 +91,7 @@ async def test_mostrar_confirmacion_finalizar_carrito_renders_summary(monkeypatc
 
 @pytest.mark.asyncio
 async def test_ejecutar_finalizar_pedido_success_stores_payment_context(monkeypatch):
-    query = _build_query("confirm_finalize_42")
+    query = _build_query(f"confirm_finalize_{TEST_INVOICE_ID}")
     update = SimpleNamespace(callback_query=query)
     context = _build_context()
 
@@ -100,7 +102,7 @@ async def test_ejecutar_finalizar_pedido_success_stores_payment_context(monkeypa
             success=True,
             payment_preference_id="pref-123",
             amount=Decimal("25.50"),
-            title="Pedido #0000000042",
+            title=f"Pedido #{TEST_INVOICE_ID}",
             payment_url="https://mp.test/pay",
         ),
     )
@@ -110,7 +112,7 @@ async def test_ejecutar_finalizar_pedido_success_stores_payment_context(monkeypa
     assert context.user_data["ultimo_pago"] == {
         "preference_id": "pref-123",
         "monto": "25.50",
-        "concepto": "Pedido #0000000042",
+        "concepto": f"Pedido #{TEST_INVOICE_ID}",
     }
     query.answer.assert_awaited_once()
     query.edit_message_text.assert_awaited_once()
@@ -122,7 +124,7 @@ async def test_ejecutar_finalizar_pedido_success_stores_payment_context(monkeypa
 
 @pytest.mark.asyncio
 async def test_ejecutar_finalizar_pedido_shows_payment_error(monkeypatch):
-    query = _build_query("confirm_finalize_42")
+    query = _build_query(f"confirm_finalize_{TEST_INVOICE_ID}")
     update = SimpleNamespace(callback_query=query)
     context = _build_context()
 
@@ -162,7 +164,7 @@ async def test_ejecutar_finalizar_pedido_handles_cancel_action():
 
 @pytest.mark.asyncio
 async def test_manejar_confirmacion_finalizar_pedido_delegates_on_confirm(monkeypatch):
-    query = _build_query("confirm_finalize_42")
+    query = _build_query(f"confirm_finalize_{TEST_INVOICE_ID}")
     update = SimpleNamespace(callback_query=query)
     context = _build_context()
 

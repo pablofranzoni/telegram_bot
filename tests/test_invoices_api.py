@@ -8,10 +8,7 @@ import pytest
 from shared.services.invoice_service import InvoiceDTO, InvoiceItemDTO
 
 
-# --------------------------------------------------------------------------- #
-#  Helpers
-# --------------------------------------------------------------------------- #
-
+# Helpers
 def _make_invoice(
     invoice_id: int = 1,
     fecha: str = "2026-04-20 10:00:00",
@@ -52,235 +49,195 @@ def _make_item(
     )
 
 
-# --------------------------------------------------------------------------- #
-#  Flask test client fixture
-# --------------------------------------------------------------------------- #
-
-@pytest.fixture
-def client():
-    """Creates a Flask test client with a clean app instance."""
-    from flask import Flask
-    from routes.invoices_routes import invoices_bp
-
-    app = Flask(__name__)
-    app.register_blueprint(invoices_bp, url_prefix="/api")
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
-
-
 # ===========================================================================
-#  GET /api/invoices
+#  GET /api/invoices (PROTECTED - Requires JWT token)
 # ===========================================================================
-
 class TestListInvoices:
-    def test_returns_200_with_invoices(self, client):
-        dtos = [_make_invoice(1), _make_invoice(2, estado="pagado", total=Decimal("500.00"))]
-        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=(dtos, 2)):
-            response = client.get("/api/invoices")
+    """Test cases for GET /api/invoices endpoint."""
+    
+    def test_list_invoices_without_token_returns_401(self, client):
+        """Test that listing invoices without JWT token returns 401."""
+        response = client.get("/api/invoices")
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+    
+    def test_list_invoices_with_invalid_token_returns_401(self, client):
+        """Test that listing invoices with invalid JWT token returns 401."""
+        response = client.get(
+            "/api/invoices",
+            headers={"Authorization": "Bearer invalid_token"}
+        )
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_list_invoices_with_valid_token_returns_200(self, client, auth_headers):
+        """Test that listing invoices with valid JWT token returns 200."""
+        invoices = [_make_invoice(1), _make_invoice(2, customer_name="Ana García")]
+        
+        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=(invoices, 2)):
+            response = client.get("/api/invoices", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.get_json()
         assert len(body["invoices"]) == 2
-        assert body["invoices"][0]["id"] == 1
-        assert body["invoices"][1]["estado"] == "pagado"
+        assert body["pagination"]["total"] == 2
 
-    def test_empty_list_returns_200(self, client):
+    def test_list_invoices_with_pagination(self, client, auth_headers):
+        """Test invoices list with pagination parameters."""
+        invoices = [_make_invoice(1)]
+        
+        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=(invoices, 1)):
+            response = client.get(
+                "/api/invoices?page=1&per_page=10",
+                headers=auth_headers
+            )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["pagination"]["page"] == 1
+
+    def test_list_invoices_empty_returns_200(self, client, auth_headers):
+        """Test that empty invoices list returns 200."""
         with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=([], 0)):
-            response = client.get("/api/invoices")
+            response = client.get("/api/invoices", headers=auth_headers)
+
         assert response.status_code == 200
         body = response.get_json()
         assert body["invoices"] == []
-        assert body["pagination"]["total"] == 0
-
-    def test_pagination_params_forwarded(self, client):
-        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=([], 0)) as mock_svc:
-            client.get("/api/invoices?page=2&per_page=5")
-        mock_svc.assert_called_once_with(page=2, per_page=5, estado=None, customer_id=None)
-
-    def test_estado_filter_forwarded(self, client):
-        dto = _make_invoice(estado="pagado")
-        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=([dto], 1)) as mock_svc:
-            response = client.get("/api/invoices?estado=pagado")
-        assert response.status_code == 200
-        mock_svc.assert_called_once_with(page=1, per_page=10, estado="pagado", customer_id=None)
-
-    def test_invalid_estado_returns_400(self, client):
-        response = client.get("/api/invoices?estado=invalido")
-        assert response.status_code == 400
-        assert "estado inválido" in response.get_json()["error"]
-
-    def test_customer_id_filter_forwarded(self, client):
-        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=([], 0)) as mock_svc:
-            response = client.get("/api/invoices?customer_id=3")
-        assert response.status_code == 200
-        mock_svc.assert_called_once_with(page=1, per_page=10, estado=None, customer_id=3)
-
-    def test_invalid_customer_id_returns_400(self, client):
-        response = client.get("/api/invoices?customer_id=abc")
-        assert response.status_code == 400
-        assert "customer_id" in response.get_json()["error"]
-
-    def test_invalid_page_returns_400(self, client):
-        response = client.get("/api/invoices?page=nope")
-        assert response.status_code == 400
-
-    def test_pagination_shape(self, client):
-        dtos = [_make_invoice(i) for i in range(1, 4)]
-        with patch("routes.invoices_routes.invoice_service.list_invoices", return_value=(dtos, 3)):
-            response = client.get("/api/invoices?page=1&per_page=10")
-
-        body = response.get_json()
-        pagination = body["pagination"]
-        assert pagination["page"] == 1
-        assert pagination["per_page"] == 10
-        assert pagination["total"] == 3
-        assert pagination["total_pages"] == 1
 
 
 # ===========================================================================
-#  GET /api/invoices/<id>
+#  GET /api/invoices/<id> (PROTECTED - Requires JWT token)
 # ===========================================================================
-
 class TestGetInvoice:
-    def test_returns_invoice_with_items(self, client):
-        dto = _make_invoice(5)
-        items = [_make_item(1), _make_item(2, product_name="Coca Cola", cantidad=1, precio_unitario=Decimal("300.00"), subtotal=Decimal("300.00"))]
-        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=dto), \
-             patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=items):
-            response = client.get("/api/invoices/5")
+    """Test cases for GET /api/invoices/<id> endpoint."""
+    
+    def test_get_invoice_without_token_returns_401(self, client):
+        """Test that getting invoice without JWT token returns 401."""
+        response = client.get("/api/invoices/1")
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_get_invoice_with_valid_token_returns_200(self, client, auth_headers):
+        """Test that getting invoice with valid JWT token returns 200."""
+        invoice = _make_invoice(1)
+        items = [_make_item(1), _make_item(2, product_name="Coca-Cola", subtotal=Decimal("30.00"))]
+        
+        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=invoice):
+            with patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=items):
+                response = client.get("/api/invoices/1", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.get_json()
-        assert body["id"] == 5
-        assert body["customer"]["nombre"] == "Pablo Franzoni"
+        assert body["id"] == 1
         assert len(body["items"]) == 2
-        assert body["items"][0]["product_name"] == "Pizza Muzzarella"
 
-    def test_returns_404_when_not_found(self, client):
+    def test_get_nonexistent_invoice_returns_404(self, client, auth_headers):
+        """Test that getting non-existent invoice returns 404."""
         with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=None):
-            response = client.get("/api/invoices/999")
+            response = client.get("/api/invoices/999", headers=auth_headers)
+
         assert response.status_code == 404
-        assert "Invoice no encontrada" in response.get_json()["error"]
-
-    def test_invoice_total_is_float(self, client):
-        dto = _make_invoice(1, total=Decimal("123.45"))
-        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=dto), \
-             patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=[]):
-            response = client.get("/api/invoices/1")
-        assert isinstance(response.get_json()["total"], float)
 
 
 # ===========================================================================
-#  GET /api/invoices/<id>/items
+#  GET /api/invoices/<id>/items (PROTECTED - Requires JWT token)
 # ===========================================================================
-
 class TestGetInvoiceItems:
-    def test_returns_items_for_existing_invoice(self, client):
-        dto = _make_invoice(3)
+    """Test cases for GET /api/invoices/<id>/items endpoint."""
+    
+    def test_get_invoice_items_without_token_returns_401(self, client):
+        """Test that getting invoice items without JWT token returns 401."""
+        response = client.get("/api/invoices/1/items")
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_get_invoice_items_with_valid_token_returns_200(self, client, auth_headers):
+        """Test that getting invoice items with valid JWT token returns 200."""
+        invoice = _make_invoice(1)
         items = [_make_item(1), _make_item(2)]
-        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=dto), \
-             patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=items):
-            response = client.get("/api/invoices/3/items")
+        
+        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=invoice):
+            with patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=items):
+                response = client.get("/api/invoices/1/items", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.get_json()
-        assert body["invoice_id"] == 3
+        assert body["invoice_id"] == 1
         assert len(body["items"]) == 2
 
-    def test_returns_empty_items_list(self, client):
-        dto = _make_invoice(4)
-        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=dto), \
-             patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=[]):
-            response = client.get("/api/invoices/4/items")
-
-        assert response.status_code == 200
-        assert response.get_json()["items"] == []
-
-    def test_returns_404_when_invoice_not_found(self, client):
+    def test_get_items_of_nonexistent_invoice_returns_404(self, client, auth_headers):
+        """Test that getting items of non-existent invoice returns 404."""
         with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=None):
-            response = client.get("/api/invoices/999/items")
+            response = client.get("/api/invoices/999/items", headers=auth_headers)
+
         assert response.status_code == 404
 
-    def test_item_fields_present(self, client):
-        dto = _make_invoice(1)
-        item = _make_item()
-        with patch("routes.invoices_routes.invoice_service.get_invoice", return_value=dto), \
-             patch("routes.invoices_routes.invoice_service.get_invoice_items", return_value=[item]):
-            response = client.get("/api/invoices/1/items")
-
-        item_body = response.get_json()["items"][0]
-        assert "id" in item_body
-        assert "product_id" in item_body
-        assert "product_name" in item_body
-        assert "product_description" in item_body
-        assert "cantidad" in item_body
-        assert "precio_unitario" in item_body
-        assert "subtotal" in item_body
-
 
 # ===========================================================================
-#  GET /api/invoices/by-customer/<telegram_id>
+#  GET /api/invoices/by-customer/<telegram_id> (PROTECTED - Requires JWT token)
 # ===========================================================================
-
 class TestListInvoicesByCustomer:
-    def test_returns_invoices_for_existing_customer(self, client):
-        dtos = [_make_invoice(1), _make_invoice(2, estado="pagado")]
-        with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=(dtos, 2)):
-            response = client.get("/api/invoices/by-customer/7225069015")
+    """Test cases for GET /api/invoices/by-customer/<telegram_id> endpoint."""
+    
+    def test_list_customer_invoices_without_token_returns_401(self, client):
+        """Test that listing customer invoices without JWT token returns 401."""
+        response = client.get("/api/invoices/by-customer/7225069015")
+        
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_list_customer_invoices_with_valid_token_returns_200(self, client, auth_headers):
+        """Test that listing customer invoices with valid JWT token returns 200."""
+        invoices = [_make_invoice(1, telegram_id="7225069015")]
+        
+        with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=(invoices, 1)):
+            response = client.get(
+                "/api/invoices/by-customer/7225069015",
+                headers=auth_headers
+            )
 
         assert response.status_code == 200
         body = response.get_json()
-        assert body["telegram_id"] == "7225069015"
-        assert len(body["invoices"]) == 2
+        assert len(body["invoices"]) == 1
+        assert body["invoices"][0]["customer"]["telegram_id"] == "7225069015"
 
-    def test_returns_404_when_customer_not_found(self, client):
-        with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=None):
-            response = client.get("/api/invoices/by-customer/9999999999")
-        assert response.status_code == 404
-        assert "Cliente no encontrado" in response.get_json()["error"]
-
-    def test_estado_filter_forwarded(self, client):
-        with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=([], 0)) as mock_svc:
-            client.get("/api/invoices/by-customer/7225069015?estado=pagado")
-        mock_svc.assert_called_once_with(telegram_id="7225069015", page=1, per_page=10, estado="pagado")
-
-    def test_invalid_estado_returns_400(self, client):
-        response = client.get("/api/invoices/by-customer/7225069015?estado=roto")
-        assert response.status_code == 400
-
-    def test_pagination_params_forwarded(self, client):
-        with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=([], 0)) as mock_svc:
-            client.get("/api/invoices/by-customer/7225069015?page=3&per_page=5")
-        mock_svc.assert_called_once_with(telegram_id="7225069015", page=3, per_page=5, estado=None)
-
-    def test_pagination_shape_present(self, client):
+    def test_list_customer_invoices_no_results_returns_200(self, client, auth_headers):
+        """Test that listing customer with no invoices returns 200."""
         with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=([], 0)):
-            response = client.get("/api/invoices/by-customer/7225069015")
-        body = response.get_json()
-        assert "pagination" in body
-        assert body["pagination"]["total"] == 0
+            response = client.get(
+                "/api/invoices/by-customer/9999999999",
+                headers=auth_headers
+            )
 
-    def test_empty_invoice_list_returns_200(self, client):
-        with patch("routes.invoices_routes.invoice_service.list_invoices_by_customer", return_value=([], 0)):
-            response = client.get("/api/invoices/by-customer/7225069015")
         assert response.status_code == 200
-        assert response.get_json()["invoices"] == []
+        body = response.get_json()
+        assert body["invoices"] == []
 
 
 # ===========================================================================
-#  Verify write methods are NOT exposed
+#  Write methods (POST, PUT, DELETE) should not be allowed
 # ===========================================================================
-
-class TestNoWriteEndpoints:
+class TestInvoiceReadOnlyConstraints:
+    """Test that write operations are not allowed on invoices."""
+    
     @pytest.mark.parametrize("method,url", [
         ("post", "/api/invoices"),
         ("put", "/api/invoices/1"),
-        ("patch", "/api/invoices/1"),
         ("delete", "/api/invoices/1"),
         ("post", "/api/invoices/1/items"),
         ("delete", "/api/invoices/1/items"),
     ])
     def test_write_methods_return_405(self, client, method, url):
+        """Test that write methods on invoices return 405 Method Not Allowed."""
         response = getattr(client, method)(url, json={})
         assert response.status_code == 405

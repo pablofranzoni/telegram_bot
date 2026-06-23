@@ -3,6 +3,7 @@
 from flask import Blueprint, jsonify, request
 
 from shared.services import category_service
+from shared.decorators import api_token_required
 
 categories_bp = Blueprint("categories", __name__)
 
@@ -45,6 +46,7 @@ def get_category(category_id: int):
 #  POST /api/categories
 # --------------------------------------------------------------------------- #
 @categories_bp.route("/categories", methods=["POST"])
+@api_token_required
 def create_category():
     """Creates a new category.
 
@@ -96,6 +98,7 @@ def create_category():
 #  PUT /api/categories/<id>
 # --------------------------------------------------------------------------- #
 @categories_bp.route("/categories/<int:category_id>", methods=["PUT"])
+@api_token_required
 def update_category(category_id: int):
     """Partially updates a category.
 
@@ -143,6 +146,7 @@ def update_category(category_id: int):
 #  DELETE /api/categories/<id>
 # --------------------------------------------------------------------------- #
 @categories_bp.route("/categories/<int:category_id>", methods=["DELETE"])
+@api_token_required
 def delete_category(category_id: int):
     """Deletes a category by id."""
     success = category_service.delete_category(category_id)

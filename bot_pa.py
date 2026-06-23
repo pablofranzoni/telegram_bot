@@ -7,6 +7,7 @@ import requests
 import atexit
 
 from flask import Flask, jsonify, request
+from flask_jwt_extended import JWTManager
 from dotenv import load_dotenv
 from telegram.ext import Application
 
@@ -17,8 +18,10 @@ from routes.csv_routes import csv_bp
 from routes.products_routes import products_bp
 from routes.categories_routes import categories_bp
 from routes.invoices_routes import invoices_bp
+from routes.auth_routes import auth_bp
 from utils import mpago
 from utils.logging_config import configure_logging
+from utils.config import Config
 
 # ==================== CONFIGURACIÓN ====================
 load_dotenv()
@@ -48,6 +51,14 @@ app_flask.config['UPLOAD_FOLDER'] = './uploads'  # Carpeta donde se guardarán l
 app_flask.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024  # Límite de 4MB
 app_flask.config['ALLOWED_EXTENSIONS'] = {'csv'}
 
+# JWT Configuration
+app_flask.config['JWT_SECRET_KEY'] = Config.JWT_SECRET_KEY
+app_flask.config['JWT_ALGORITHM'] = Config.JWT_ALGORITHM
+app_flask.config['JWT_ACCESS_TOKEN_EXPIRES'] = Config.JWT_ACCESS_TOKEN_EXPIRES
+
+# Initialize JWTManager
+jwt = JWTManager(app_flask)
+
 # Variable global para la app de Telegram (se inicializa una sola vez)
 telegram_app: Application | None = None
 telegram_loop: asyncio.AbstractEventLoop | None = None
@@ -61,6 +72,7 @@ os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 #db_manager.init_db(DatabaseType.SQLITE, db_path="./pedidos_bot.db")
 db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL'))
 
+app_flask.register_blueprint(auth_bp, url_prefix='/api')
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
 app_flask.register_blueprint(products_bp, url_prefix='/api')
 app_flask.register_blueprint(categories_bp, url_prefix='/api')

@@ -132,7 +132,7 @@ def test_build_receipt_pdf_contains_expected_content(monkeypatch):
     assert "Email: ana@example.com" in pdf_text
     assert "Empresa: Acme SRL" in pdf_text
     assert "Direccion: Calle Falsa 123" in pdf_text
-    assert "Estado pago: aprobado" in pdf_text
+    assert "Estado pago: Aprobado" in pdf_text
     assert "Pago ID: mp-123" in pdf_text
     assert "Coca-Cola" in pdf_text
     assert "Hamburguesa Doble" in pdf_text

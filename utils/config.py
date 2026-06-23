@@ -42,3 +42,9 @@ class Config:
     BUSINESS_NAME = os.getenv('BUSINESS_NAME', EMAIL_FROM_NAME)
     BUSINESS_EMAIL = os.getenv('BUSINESS_EMAIL', GMAIL_USER or '')
     SEND_PDF_MODE = os.getenv('SEND_PDF_MODE', 'EMAIL').upper()
+
+    # JWT Configuration
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
+    JWT_ALGORITHM = 'HS256'
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '3600'))  # 1 hour in seconds
+    JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', '2592000'))  # 30 days in seconds

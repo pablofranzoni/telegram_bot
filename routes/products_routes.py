@@ -5,6 +5,7 @@ import math
 from flask import Blueprint, jsonify, request
 
 from shared.services import product_service
+from shared.decorators import api_token_required
 
 products_bp = Blueprint("products", __name__)
 
@@ -63,6 +64,7 @@ def get_product(product_id: int):
 #  POST /api/products
 # --------------------------------------------------------------------------- #
 @products_bp.route("/products", methods=["POST"])
+@api_token_required
 def create_product():
     """Creates a new product.
 
@@ -125,6 +127,7 @@ def create_product():
 #  PUT /api/products/<id>
 # --------------------------------------------------------------------------- #
 @products_bp.route("/products/<int:product_id>", methods=["PUT"])
+@api_token_required
 def update_product(product_id: int):
     """Partially updates a product.
 
@@ -171,6 +174,7 @@ def update_product(product_id: int):
 #  DELETE /api/products/<id>
 # --------------------------------------------------------------------------- #
 @products_bp.route("/products/<int:product_id>", methods=["DELETE"])
+@api_token_required
 def deactivate_product(product_id: int):
     """Soft-deletes a product (sets disponible=False)."""
     success = product_service.deactivate_product(product_id)

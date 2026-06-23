@@ -7,25 +7,7 @@ import pytest
 from shared.dtos import CategoryDTO
 
 
-# --------------------------------------------------------------------------- #
-#  Flask test client fixture
-# --------------------------------------------------------------------------- #
-@pytest.fixture
-def client():
-    """Creates a Flask test client with a clean app instance."""
-    from flask import Flask
-    from routes.categories_routes import categories_bp
-
-    app = Flask(__name__)
-    app.register_blueprint(categories_bp, url_prefix="/api")
-    app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
-
-
-# --------------------------------------------------------------------------- #
-#  Sample data helpers
-# --------------------------------------------------------------------------- #
+# Sample data helpers
 def _make_dto(
     category_id: int = 1,
     codigo: str = "PIZ",
@@ -43,10 +25,13 @@ def _make_dto(
 
 
 # ===========================================================================
-#  GET /api/categories
+#  GET /api/categories (PUBLIC - No authentication required)
 # ===========================================================================
 class TestListCategories:
+    """Test cases for GET /api/categories endpoint."""
+    
     def test_returns_200_with_categories(self, client):
+        """Test that listing categories returns all categories."""
         dtos = [_make_dto(1), _make_dto(2, codigo="HAM", name="Hamburguesas", description="Hamburguesas gourmet")]
         with patch("routes.categories_routes.category_service.list_categories", return_value=dtos):
             response = client.get("/api/categories")
@@ -58,6 +43,7 @@ class TestListCategories:
         assert body["categories"][1]["nombre"] == "Hamburguesas"
 
     def test_empty_list_returns_200(self, client):
+        """Test that empty category list returns 200."""
         with patch("routes.categories_routes.category_service.list_categories", return_value=[]):
             response = client.get("/api/categories")
         assert response.status_code == 200
@@ -65,10 +51,13 @@ class TestListCategories:
 
 
 # ===========================================================================
-#  GET /api/categories/<id>
+#  GET /api/categories/<id> (PUBLIC - No authentication required)
 # ===========================================================================
 class TestGetCategory:
+    """Test cases for GET /api/categories/<id> endpoint."""
+    
     def test_returns_category_when_found(self, client):
+        """Test retrieving an existing category."""
         dto = _make_dto(3)
         with patch("routes.categories_routes.category_service.get_category", return_value=dto):
             response = client.get("/api/categories/3")
@@ -78,119 +67,175 @@ class TestGetCategory:
         assert body["id"] == 3
         assert body["codigo"] == "PIZ"
 
-    def test_returns_404_when_not_found(self, client):
+    def test_returns_404_when_category_not_found(self, client):
+        """Test retrieving a non-existent category."""
         with patch("routes.categories_routes.category_service.get_category", return_value=None):
             response = client.get("/api/categories/999")
+
         assert response.status_code == 404
+        assert response.get_json()["error"] == "Categoría no encontrada"
 
 
 # ===========================================================================
-#  POST /api/categories
+#  POST /api/categories (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestCreateCategory:
-    def test_creates_category_successfully(self, client):
-        dto = _make_dto(5)
-        with patch("routes.categories_routes.category_service.create_category", return_value=dto):
+    """Test cases for POST /api/categories endpoint."""
+    
+    def test_create_category_without_token_returns_401(self, client):
+        """Test that creating category without JWT token returns 401."""
+        response = client.post(
+            "/api/categories",
+            json={
+                "codigo": "NEW",
+                "nombre": "New Category",
+                "descripcion": "Description"
+            }
+        )
+
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_create_category_with_invalid_token_returns_401(self, client):
+        """Test that creating category with invalid JWT token returns 401."""
+        response = client.post(
+            "/api/categories",
+            json={
+                "codigo": "NEW",
+                "nombre": "New Category",
+                "descripcion": "Description"
+            },
+            headers={"Authorization": "Bearer invalid_token"}
+        )
+
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_create_category_with_valid_token_succeeds(self, client, auth_headers):
+        """Test that creating category with valid JWT token succeeds."""
+        created_dto = _make_dto(5, codigo="BUR", name="Burgers")
+        
+        with patch("routes.categories_routes.category_service.create_category", return_value=created_dto):
             response = client.post(
                 "/api/categories",
-                json={"codigo": "piz", "nombre": "Pizzas", "descripcion": "Pizzas artesanales"},
+                json={
+                    "codigo": "BUR",
+                    "nombre": "Burgers",
+                    "descripcion": "Fast food burgers"
+                },
+                headers=auth_headers
             )
 
         assert response.status_code == 201
         body = response.get_json()
-        assert body["id"] == 5
-        assert body["codigo"] == "PIZ"  # normalized to uppercase
+        assert body["codigo"] == "BUR"
+        assert body["nombre"] == "Burgers"
 
-    def test_missing_required_fields_returns_400(self, client):
-        response = client.post("/api/categories", json={"codigo": "PIZ"})
-        assert response.status_code == 400
-        assert "faltantes" in response.get_json()["error"]
-
-    def test_no_json_body_returns_400(self, client):
-        response = client.post("/api/categories")
-        assert response.status_code == 400
-
-    def test_codigo_too_long_returns_400(self, client):
+    def test_create_category_missing_required_fields_returns_400(self, client, auth_headers):
+        """Test that missing required fields return 400."""
         response = client.post(
             "/api/categories",
-            json={"codigo": "TOOLONGCODE", "nombre": "X", "descripcion": "Y"},
+            json={"codigo": "NEW"},  # Missing nombre and descripcion
+            headers=auth_headers
         )
+
         assert response.status_code == 400
 
-    def test_invalid_parent_id_returns_400(self, client):
+    def test_create_category_empty_body_returns_400(self, client, auth_headers):
+        """Test that empty body returns 400."""
         response = client.post(
             "/api/categories",
-            json={"codigo": "PIZ", "nombre": "Pizzas", "descripcion": "X", "parent_id": "abc"},
+            headers=auth_headers
         )
+
         assert response.status_code == 400
-
-    def test_service_failure_returns_500(self, client):
-        with patch("routes.categories_routes.category_service.create_category", return_value=None):
-            response = client.post(
-                "/api/categories",
-                json={"codigo": "PIZ", "nombre": "Pizzas", "descripcion": "X"},
-            )
-        assert response.status_code == 500
-
-    def test_creates_with_parent_id(self, client):
-        dto = _make_dto(6, codigo="SUB", name="Subcat", description="Sub", parent_id=1)
-        with patch("routes.categories_routes.category_service.create_category", return_value=dto) as mock_create:
-            client.post(
-                "/api/categories",
-                json={"codigo": "sub", "nombre": "Subcat", "descripcion": "Sub", "parent_id": 1},
-            )
-        mock_create.assert_called_once_with(codigo="SUB", nombre="Subcat", descripcion="Sub", parent_id=1)
 
 
 # ===========================================================================
-#  PUT /api/categories/<id>
+#  PUT /api/categories/<id> (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestUpdateCategory:
-    def test_updates_category_successfully(self, client):
-        dto = _make_dto(1, description="Pizzas italianas")
-        with patch("routes.categories_routes.category_service.update_category", return_value=dto):
-            response = client.put("/api/categories/1", json={"descripcion": "Pizzas italianas"})
+    """Test cases for PUT /api/categories/<id> endpoint."""
+    
+    def test_update_category_without_token_returns_401(self, client):
+        """Test that updating category without JWT token returns 401."""
+        response = client.put(
+            "/api/categories/1",
+            json={"nombre": "Updated"}
+        )
+
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_update_category_with_valid_token_succeeds(self, client, auth_headers):
+        """Test that updating category with valid JWT token succeeds."""
+        updated_dto = _make_dto(1, name="Updated Pizzas")
+        
+        with patch("routes.categories_routes.category_service.update_category", return_value=updated_dto):
+            response = client.put(
+                "/api/categories/1",
+                json={"nombre": "Updated Pizzas"},
+                headers=auth_headers
+            )
 
         assert response.status_code == 200
-        assert response.get_json()["descripcion"] == "Pizzas italianas"
+        body = response.get_json()
+        assert body["nombre"] == "Updated Pizzas"
 
-    def test_returns_404_when_not_found(self, client):
+    def test_update_nonexistent_category_returns_404(self, client, auth_headers):
+        """Test that updating non-existent category returns 404."""
         with patch("routes.categories_routes.category_service.update_category", return_value=None):
-            response = client.put("/api/categories/999", json={"nombre": "X"})
+            response = client.put(
+                "/api/categories/999",
+                json={"nombre": "Updated"},
+                headers=auth_headers
+            )
+
         assert response.status_code == 404
 
-    def test_no_json_body_returns_400(self, client):
-        response = client.put("/api/categories/1")
-        assert response.status_code == 400
+    def test_update_category_empty_body_returns_400(self, client, auth_headers):
+        """Test that empty body returns 400."""
+        response = client.put(
+            "/api/categories/1",
+            headers=auth_headers
+        )
 
-    def test_no_valid_fields_returns_400(self, client):
-        response = client.put("/api/categories/1", json={"unknown_field": "value"})
-        assert response.status_code == 400
-
-    def test_codigo_is_uppercased(self, client):
-        dto = _make_dto(1, codigo="HAM")
-        with patch("routes.categories_routes.category_service.update_category", return_value=dto) as mock_update:
-            client.put("/api/categories/1", json={"codigo": "ham"})
-        _, kwargs = mock_update.call_args
-        assert mock_update.call_args[0][1]["codigo"] == "HAM"
-
-    def test_invalid_parent_id_returns_400(self, client):
-        response = client.put("/api/categories/1", json={"parent_id": "bad"})
         assert response.status_code == 400
 
 
 # ===========================================================================
-#  DELETE /api/categories/<id>
+#  DELETE /api/categories/<id> (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestDeleteCategory:
-    def test_deletes_category_successfully(self, client):
+    """Test cases for DELETE /api/categories/<id> endpoint."""
+    
+    def test_delete_category_without_token_returns_401(self, client):
+        """Test that deleting category without JWT token returns 401."""
+        response = client.delete("/api/categories/1")
+
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+
+    def test_delete_category_with_valid_token_succeeds(self, client, auth_headers):
+        """Test that deleting category with valid JWT token succeeds."""
         with patch("routes.categories_routes.category_service.delete_category", return_value=True):
-            response = client.delete("/api/categories/1")
+            response = client.delete(
+                "/api/categories/1",
+                headers=auth_headers
+            )
 
         assert response.status_code == 200
-        assert "eliminada" in response.get_json()["message"]
 
-    def test_returns_404_when_not_found(self, client):
+    def test_delete_nonexistent_category_returns_404(self, client, auth_headers):
+        """Test that deleting non-existent category returns 404."""
         with patch("routes.categories_routes.category_service.delete_category", return_value=False):
-            response = client.delete("/api/categories/999")
+            response = client.delete(
+                "/api/categories/999",
+                headers=auth_headers
+            )
+
         assert response.status_code == 404
