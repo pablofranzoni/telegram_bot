@@ -34,13 +34,22 @@ CREATE TABLE IF NOT EXISTS "customers" (
 	"postal_code"	TEXT,
 	"company"	TEXT,
 	"username"	TEXT,
+	"password_hash"	TEXT,
 	"created_at"	TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	"updated_at"	TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	"is_active"	BOOLEAN DEFAULT 1,
+	"is_admin"	INTEGER DEFAULT 0,
+	"email_verified"	BOOLEAN DEFAULT 0,
+	"email_verification_code"	TEXT,
+	"email_verification_expires"	TIMESTAMP,
+	"password_reset_token"	TEXT,
+	"password_reset_expires"	TIMESTAMP,
+	"created_by"	INTEGER,
 	"notes"	TEXT,
 	"last_purchase_date"	TIMESTAMP,
 	"total_purchases"	REAL DEFAULT 0,
-	PRIMARY KEY("id" AUTOINCREMENT)
+	PRIMARY KEY("id" AUTOINCREMENT),
+	FOREIGN KEY("created_by") REFERENCES "customers"("id")
 );
 CREATE TABLE IF NOT EXISTS "invoice_items" (
 	"id"	INTEGER,

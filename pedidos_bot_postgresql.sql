@@ -54,9 +54,17 @@ CREATE TABLE IF NOT EXISTS customers (
     postal_code VARCHAR(20),                        -- Código postal
     company VARCHAR(200),                            -- Nombre de empresa
     username VARCHAR(100),                           -- Nombre de usuario
+    password_hash VARCHAR(255),                      -- Hash bcrypt de contraseña (solo para API users)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE,
+    is_admin INTEGER DEFAULT 0,                     -- 0 = customer, 1 = admin (solo super admin puede registrar)
+    email_verified BOOLEAN DEFAULT FALSE,           -- Email verificado para admins
+    email_verification_code VARCHAR(10),            -- Código de 6 dígitos
+    email_verification_expires TIMESTAMP,           -- Expira en 15 minutos
+    password_reset_token VARCHAR(64),               -- Token para reset de contraseña
+    password_reset_expires TIMESTAMP,               -- Expira en 1 hora
+    created_by INTEGER REFERENCES customers(id),   -- Quién creó este usuario
     notes TEXT,                                      -- Notas pueden ser largas
     last_purchase_date TIMESTAMP,
     total_purchases NUMERIC DEFAULT 0

@@ -19,6 +19,7 @@ from routes.products_routes import products_bp
 from routes.categories_routes import categories_bp
 from routes.invoices_routes import invoices_bp
 from routes.auth_routes import auth_bp
+from routes.admin_routes import admin_bp
 from utils import mpago
 from utils.logging_config import configure_logging
 from utils.config import Config
@@ -73,6 +74,7 @@ os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL'))
 
 app_flask.register_blueprint(auth_bp, url_prefix='/api')
+app_flask.register_blueprint(admin_bp, url_prefix='/api')
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
 app_flask.register_blueprint(products_bp, url_prefix='/api')
 app_flask.register_blueprint(categories_bp, url_prefix='/api')

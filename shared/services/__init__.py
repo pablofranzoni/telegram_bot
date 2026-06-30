@@ -6,7 +6,7 @@ from .catalog_service import get_product_by_id, list_categories, list_products_b
 from . import category_service
 from .checkout_service import finalize_checkout
 from .document_service import build_receipt_pdf, build_receipt_pdf_attachment, send_receipt_pdf_via_telegram
-from .email_service import send_email, send_verification_email
+from .email_service import send_email, send_verification_email, send_password_reset_email
 from .payment_service import create_payment_link
 
 __all__ = [
@@ -16,6 +16,7 @@ __all__ = [
 	"create_payment_link",
 	"send_email",
 	"send_verification_email",
+	"send_password_reset_email",
 	"finalize_checkout",
 	"generate_verification_code",
 	"get_customer_with_email",

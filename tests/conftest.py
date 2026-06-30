@@ -3,6 +3,8 @@
 from decimal import Decimal
 import os
 import sys
+import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 from flask import Flask
@@ -18,6 +20,9 @@ os.environ['FLASK_ENV'] = 'testing'
 TEST_INVOICE_ID = "550e8400-e29b-41d4-a716-446655440000"
 TEST_API_USER = "test_user"
 TEST_API_PASSWORD = "test_password"
+TEST_ADMIN_USER = "admin_user"
+TEST_ADMIN_PASSWORD = "AdminPass123!"
+TEST_ADMIN_EMAIL = "admin@example.com"
 
 
 @pytest.fixture
@@ -57,6 +62,7 @@ def app() -> Flask:
     from flask import Flask
     from flask_jwt_extended import JWTManager
     from routes.auth_routes import auth_bp
+    from routes.admin_routes import admin_bp
     from routes.products_routes import products_bp
     from routes.categories_routes import categories_bp
     from routes.invoices_routes import invoices_bp
@@ -73,6 +79,7 @@ def app() -> Flask:
     
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api')
+    app.register_blueprint(admin_bp, url_prefix='/api')
     app.register_blueprint(products_bp, url_prefix='/api')
     app.register_blueprint(categories_bp, url_prefix='/api')
     app.register_blueprint(invoices_bp, url_prefix='/api')
@@ -102,3 +109,55 @@ def auth_headers(access_token: str) -> dict[str, str]:
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
+
+
+@pytest.fixture
+def admin_access_token(app: Flask) -> str:
+    """Generate a valid JWT access token for admin user."""
+    with app.app_context():
+        token = create_access_token(identity=TEST_ADMIN_USER)
+    return token
+
+
+@pytest.fixture
+def admin_auth_headers(admin_access_token: str) -> dict[str, str]:
+    """Create Authorization headers with admin JWT token."""
+    return {
+        "Authorization": f"Bearer {admin_access_token}",
+        "Content-Type": "application/json"
+    }
+
+
+@pytest.fixture
+def setup_test_admin(app: Flask):
+    """
+    Create a test admin user in the database with email verified.
+    
+    Used by tests to have a verified admin to work with.
+    """
+    from shared.services.user_service import UserService, PasswordHasher
+    from database.db_sqlite import get_db
+    
+    # Create the admin user
+    try:
+        user_data = UserService.create_api_user(
+            username=TEST_ADMIN_USER,
+            email=TEST_ADMIN_EMAIL,
+            name="Test Admin",
+            password=TEST_ADMIN_PASSWORD,
+            created_by_id=None  # First super-admin has no creator
+        )
+        
+        # Manually verify email (skip verification code for testing)
+        db = get_db()
+        db.execute("""
+            UPDATE customers
+            SET email_verified = 1, email_verification_code = NULL, email_verification_expires = NULL
+            WHERE id = ?
+        """, (user_data["id"],))
+        db.commit()
+        
+        return user_data
+    except Exception as e:
+        # User might already exist, that's okay
+        return UserService.get_user_by_username(TEST_ADMIN_USER)
