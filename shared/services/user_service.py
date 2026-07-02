@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any
 
 import bcrypt
 
-from database.db_sqlite import get_db
+from database.db_manager import get_db
 
 logger = logging.getLogger(__name__)
 
