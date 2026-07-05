@@ -1,4 +1,7 @@
-"""Unit tests for the /api/products REST endpoint."""
+"""Unit tests for the /api/products REST endpoint.
+
+All GET operations now require JWT authentication. See conftest.py for auth_headers fixture.
+"""
 
 from decimal import Decimal
 from unittest.mock import patch
@@ -26,16 +29,24 @@ def _make_dto(
 
 
 # ===========================================================================
-#  GET /api/products (PUBLIC - No authentication required)
+#  GET /api/products (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestListProducts:
     """Test cases for GET /api/products endpoint."""
     
-    def test_returns_200_with_products_and_pagination(self, client):
+    def test_returns_200_without_token_returns_401(self, client):
+        """Test that listing products without token returns 401."""
+        response = client.get("/api/products")
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+        assert 'MISSING_AUTH_HEADER' in data.get('error_code', '')
+    
+    def test_returns_200_with_products_and_pagination(self, client, auth_headers):
         """Test that listing products returns paginated results."""
         dtos = [_make_dto(1), _make_dto(2, name="Sprite")]
         with patch("routes.products_routes.product_service.list_products", return_value=(dtos, 2)):
-            response = client.get("/api/products")
+            response = client.get("/api/products", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.get_json()
@@ -44,7 +55,7 @@ class TestListProducts:
         assert body["pagination"]["total"] == 2
         assert body["pagination"]["total_pages"] == 1
 
-    def test_pagination_params_are_forwarded(self, client):
+    def test_pagination_params_are_forwarded(self, client, auth_headers):
         """Test that pagination parameters are correctly forwarded."""
         captured: dict = {}
 
@@ -54,51 +65,79 @@ class TestListProducts:
             return [], 0
 
         with patch("routes.products_routes.product_service.list_products", side_effect=fake_list):
-            client.get("/api/products?page=3&per_page=5")
+            client.get("/api/products?page=3&per_page=5", headers=auth_headers)
 
         assert captured["page"] == 3
         assert captured["per_page"] == 5
 
-    def test_invalid_pagination_returns_400(self, client):
+    def test_invalid_pagination_returns_400(self, client, auth_headers):
         """Test that invalid pagination parameters return 400."""
-        response = client.get("/api/products?page=abc")
+        response = client.get("/api/products?page=abc", headers=auth_headers)
         assert response.status_code == 400
 
-    def test_empty_list_returns_200(self, client):
+    def test_empty_list_returns_200(self, client, auth_headers):
         """Test that empty product list returns 200."""
         with patch("routes.products_routes.product_service.list_products", return_value=([], 0)):
-            response = client.get("/api/products")
+            response = client.get("/api/products", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.get_json()
         assert body["products"] == []
         assert body["pagination"]["total"] == 0
+    
+    def test_invalid_token_returns_401(self, client):
+        """Test that invalid token returns 401."""
+        response = client.get(
+            "/api/products",
+            headers={"Authorization": "Bearer invalid_token"}
+        )
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
 
 
 # ===========================================================================
-#  GET /api/products/<id> (PUBLIC - No authentication required)
+#  GET /api/products/<id> (PROTECTED - Requires JWT token)
 # ===========================================================================
 class TestGetProductById:
     """Test cases for GET /api/products/<id> endpoint."""
     
-    def test_get_existing_product_returns_200(self, client):
+    def test_get_without_token_returns_401(self, client):
+        """Test that getting product without token returns 401."""
+        response = client.get("/api/products/123")
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
+        assert 'MISSING_AUTH_HEADER' in data.get('error_code', '')
+    
+    def test_get_existing_product_returns_200(self, client, auth_headers):
         """Test retrieving an existing product."""
         dto = _make_dto(123, name="Pizza")
         with patch("routes.products_routes.product_service.get_product", return_value=dto):
-            response = client.get("/api/products/123")
+            response = client.get("/api/products/123", headers=auth_headers)
 
         assert response.status_code == 200
         body = response.get_json()
         assert body["id"] == 123
         assert body["nombre"] == "Pizza"
 
-    def test_get_nonexistent_product_returns_404(self, client):
+    def test_get_nonexistent_product_returns_404(self, client, auth_headers):
         """Test retrieving a non-existent product."""
         with patch("routes.products_routes.product_service.get_product", return_value=None):
-            response = client.get("/api/products/999")
+            response = client.get("/api/products/999", headers=auth_headers)
 
         assert response.status_code == 404
         assert response.get_json()["error"] == "Producto no encontrado"
+    
+    def test_get_with_invalid_token_returns_401(self, client):
+        """Test that invalid token returns 401."""
+        response = client.get(
+            "/api/products/123",
+            headers={"Authorization": "Bearer invalid_token"}
+        )
+        assert response.status_code == 401
+        data = response.get_json()
+        assert data['status'] == 'error'
 
 
 # ===========================================================================

@@ -26,8 +26,12 @@ def _product_to_dict(dto) -> dict:
 #  GET /api/products
 # --------------------------------------------------------------------------- #
 @products_bp.route("/products", methods=["GET"])
+@api_token_required
 def list_products():
-    """Returns a paginated list of all products."""
+    """Returns a paginated list of all products.
+    
+    Requires a valid JWT token in the Authorization header.
+    """
     try:
         page = max(int(request.args.get("page", 1)), 1)
         per_page = max(int(request.args.get("per_page", 10)), 1)
@@ -52,8 +56,12 @@ def list_products():
 #  GET /api/products/<id>
 # --------------------------------------------------------------------------- #
 @products_bp.route("/products/<int:product_id>", methods=["GET"])
+@api_token_required
 def get_product(product_id: int):
-    """Returns a single product by id."""
+    """Returns a single product by id.
+    
+    Requires a valid JWT token in the Authorization header.
+    """
     product = product_service.get_product(product_id)
     if product is None:
         return jsonify({"error": "Producto no encontrado"}), 404

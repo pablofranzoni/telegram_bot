@@ -100,8 +100,8 @@ All write operations (POST, PUT, DELETE) are now protected with JWT:
 - ✅ POST `/api/products` - Create product (Protected)
 - ✅ PUT `/api/products/<id>` - Update product (Protected)
 - ✅ DELETE `/api/products/<id>` - Delete product (Protected)
-- ❌ GET `/api/products` - List products (Public)
-- ❌ GET `/api/products/<id>` - Get product (Public)
+- ✅ GET `/api/products` - List products (Protected - Requires JWT)
+- ✅ GET `/api/products/<id>` - Get product (Protected - Requires JWT)
 
 **Categories API** (`routes/categories_routes.py`)
 - ✅ POST `/api/categories` - Create category (Protected)
@@ -343,10 +343,23 @@ tests/test_invoices_api.py ......................... 19 passed
 ## Conclusion
 
 The REST API now has comprehensive JWT security implementation with:
-- **24+ protected endpoints** requiring authentication
-- **60 automated security tests** ensuring compliance
+- **26+ protected endpoints** requiring authentication
+- **21 automated security tests** for products API ensuring compliance
 - **Clear error messages** for API consumers
 - **Environment-based configuration** for flexibility
 - **Production-ready error handling** for all scenarios
 
-All write operations are protected, while read-only operations remain public for better usability.
+**Updated (Semi-Public Model):** Read operations on products are now protected with JWT tokens. External clients and integrations can access the product catalog by providing valid JWT tokens, without requiring admin privileges. This provides a balance between security and usability.
+
+---
+
+## Updates
+
+### Semi-Public Products API (Latest)
+**Date:** 2026-07-02
+**Changes:**
+- GET `/api/products` now requires valid JWT token (was public)
+- GET `/api/products/<id>` now requires valid JWT token (was public)
+- Non-admin users with valid tokens can access product data
+- All 21 product API tests updated and passing
+- No impact on Telegram bot (uses internal functions, not HTTP)

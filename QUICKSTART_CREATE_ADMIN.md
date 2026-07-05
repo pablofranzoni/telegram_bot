@@ -136,7 +136,7 @@ Una vez creado el admin:
 
 ### 1. Prueba Login (POST)
 ```bash
-curl -X POST http://localhost:5000/api/login \
+curl -X POST http://192.168.1.12:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "admin", "password": "AdminPass123!"}'
 ```
