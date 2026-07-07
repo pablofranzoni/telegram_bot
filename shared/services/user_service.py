@@ -134,7 +134,23 @@ class PasswordHasher:
 
 class UserService:
     """Service for user management operations."""
-    
+
+    @staticmethod
+    def _row_get(row: Any, key: str, index: int) -> Any:
+        """
+        Access a column from a row regardless of backend.
+
+        PostgreSQL (DictCursor) returns dicts; SQLite/MySQL return tuples.
+        """
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return row.get(key)
+        try:
+            return row[index]
+        except (IndexError, TypeError, KeyError):
+            return None
+
     @staticmethod
     def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -148,23 +164,22 @@ class UserService:
         """
         try:
             db = get_db()
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT id, username, email, is_admin, is_active, created_at
                 FROM customers
                 WHERE id = ?
-            """, (user_id,))
-            row = cursor.fetchone()
-            
+            """, (user_id,), fetchone=True)
+
             if not row:
                 return None
             
             return {
-                "id": row[0],
-                "username": row[1],
-                "email": row[2],
-                "is_admin": row[3],
-                "is_active": row[4],
-                "created_at": row[5],
+                "id": UserService._row_get(row, "id", 0),
+                "username": UserService._row_get(row, "username", 1),
+                "email": UserService._row_get(row, "email", 2),
+                "is_admin": UserService._row_get(row, "is_admin", 3),
+                "is_active": UserService._row_get(row, "is_active", 4),
+                "created_at": UserService._row_get(row, "created_at", 5),
             }
         except Exception as e:
             logger.error(f"Error fetching user by ID: {str(e)}")
@@ -183,26 +198,25 @@ class UserService:
         """
         try:
             db = get_db()
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT id, username, email, is_admin, is_active, password_hash,
                        email_verified, created_at
                 FROM customers
                 WHERE username = ?
-            """, (username,))
-            row = cursor.fetchone()
+            """, (username,), fetchone=True)
 
             if not row:
                 return None
 
             return {
-                "id": row[0],
-                "username": row[1],
-                "email": row[2],
-                "is_admin": row[3],
-                "is_active": row[4],
-                "password_hash": row[5],
-                "email_verified": bool(row[6]),
-                "created_at": row[7],
+                "id": UserService._row_get(row, "id", 0),
+                "username": UserService._row_get(row, "username", 1),
+                "email": UserService._row_get(row, "email", 2),
+                "is_admin": UserService._row_get(row, "is_admin", 3),
+                "is_active": UserService._row_get(row, "is_active", 4),
+                "password_hash": UserService._row_get(row, "password_hash", 5),
+                "email_verified": bool(UserService._row_get(row, "email_verified", 6)),
+                "created_at": UserService._row_get(row, "created_at", 7),
             }
         except Exception as e:
             logger.error(f"Error fetching user by username: {str(e)}")
@@ -221,24 +235,23 @@ class UserService:
         """
         try:
             db = get_db()
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT id, username, email, is_admin, is_active, email_verified, created_at
                 FROM customers
                 WHERE email = ?
-            """, (email,))
-            row = cursor.fetchone()
+            """, (email,), fetchone=True)
 
             if not row:
                 return None
 
             return {
-                "id": row[0],
-                "username": row[1],
-                "email": row[2],
-                "is_admin": row[3],
-                "is_active": row[4],
-                "email_verified": bool(row[5]),
-                "created_at": row[6],
+                "id": UserService._row_get(row, "id", 0),
+                "username": UserService._row_get(row, "username", 1),
+                "email": UserService._row_get(row, "email", 2),
+                "is_admin": UserService._row_get(row, "is_admin", 3),
+                "is_active": UserService._row_get(row, "is_active", 4),
+                "email_verified": bool(UserService._row_get(row, "email_verified", 5)),
+                "created_at": UserService._row_get(row, "created_at", 6),
             }
         except Exception as e:
             logger.error(f"Error fetching user by email: {str(e)}")
@@ -249,11 +262,11 @@ class UserService:
         """Check if user is admin."""
         try:
             db = get_db()
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT is_admin FROM customers WHERE id = ?
-            """, (user_id,))
-            row = cursor.fetchone()
-            return row and row[0] == 1
+            """, (user_id,), fetchone=True)
+            value = UserService._row_get(row, "is_admin", 0) if row else None
+            return value == 1 or value is True
         except Exception as e:
             logger.error(f"Error checking admin status: {str(e)}")
             return False
@@ -350,9 +363,9 @@ class UserService:
         
         try:
             db = get_db()
-            cursor = db.execute("""
+            user_id = db.execute("""
                 INSERT INTO customers
-                (customer_id, username, email, name, password_hash, is_admin, 
+                (customer_id, username, email, name, password_hash, is_admin,
                  is_active, email_verified, email_verification_code,
                  email_verification_expires, created_by, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, 1, TRUE, FALSE, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -366,10 +379,7 @@ class UserService:
                 (datetime.utcnow() + timedelta(minutes=15)).isoformat(),
                 created_by_id,
             ))
-            
-            db.commit()
-            user_id = cursor.lastrowid
-            
+
             logger.info(f"Created new API user: {username} (ID: {user_id})")
             
             return {
@@ -399,17 +409,17 @@ class UserService:
         """
         try:
             db = get_db()
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT email_verification_code, email_verification_expires
                 FROM customers
                 WHERE id = ? AND is_admin = 1
-            """, (user_id,))
-            row = cursor.fetchone()
-            
+            """, (user_id,), fetchone=True)
+
             if not row:
                 return False
             
-            stored_code, expires = row
+            stored_code = UserService._row_get(row, "email_verification_code", 0)
+            expires = UserService._row_get(row, "email_verification_expires", 1)
             
             # Check expiration
             if datetime.fromisoformat(expires) < datetime.utcnow():
@@ -452,16 +462,16 @@ class UserService:
         
         # Get full user data with hash
         db = get_db()
-        cursor = db.execute("""
+        row = db.execute("""
             SELECT password_hash FROM customers WHERE id = ?
-        """, (user_id,))
-        row = cursor.fetchone()
-        
+        """, (user_id,), fetchone=True)
+
         if not row:
             return False
         
         # Verify old password
-        if not PasswordHasher.verify_password(old_password, row[0]):
+        stored_hash = UserService._row_get(row, "password_hash", 0)
+        if not PasswordHasher.verify_password(old_password, stored_hash):
             return False
         
         # Validate new password
@@ -499,18 +509,20 @@ class UserService:
         
         try:
             db = get_db()
-            
+
             # Find user by email
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT id, email, name, is_admin FROM customers WHERE email = ?
-            """, (email,))
-            row = cursor.fetchone()
-            
+            """, (email,), fetchone=True)
+
             if not row:
                 logger.warning(f"Password reset requested for non-existent email: {email}")
                 return None
             
-            user_id, user_email, user_name, is_admin = row
+            user_id = UserService._row_get(row, "id", 0)
+            user_email = UserService._row_get(row, "email", 1)
+            user_name = UserService._row_get(row, "name", 2)
+            is_admin = UserService._row_get(row, "is_admin", 3)
             
             # Only API users (admins) can reset password
             if is_admin != 1:
@@ -562,19 +574,19 @@ class UserService:
         
         try:
             db = get_db()
-            
+
             # Find user with valid token
-            cursor = db.execute("""
+            row = db.execute("""
                 SELECT id, password_reset_expires FROM customers
                 WHERE password_reset_token = ?
-            """, (reset_token,))
-            row = cursor.fetchone()
-            
+            """, (reset_token,), fetchone=True)
+
             if not row:
                 logger.warning("Password reset attempted with invalid token")
                 return False
             
-            user_id, expires_str = row
+            user_id = UserService._row_get(row, "id", 0)
+            expires_str = UserService._row_get(row, "password_reset_expires", 1)
             
             # Check token expiration (1 hour)
             if datetime.fromisoformat(expires_str) < datetime.utcnow():

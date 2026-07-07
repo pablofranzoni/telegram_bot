@@ -160,9 +160,9 @@ def _build_persistent_db(conn: sqlite3.Connection):
                     return cur.fetchone()
                 if fetchall:
                     return cur.fetchall()
-                return cur
+                return cur.lastrowid
             finally:
-                pass
+                cur.close()
 
         def executemany(self, query, params_list):
             cur = self._conn.cursor()
