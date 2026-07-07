@@ -184,15 +184,16 @@ class UserService:
         try:
             db = get_db()
             cursor = db.execute("""
-                SELECT id, username, email, is_admin, is_active, password_hash, created_at
+                SELECT id, username, email, is_admin, is_active, password_hash,
+                       email_verified, created_at
                 FROM customers
                 WHERE username = ?
             """, (username,))
             row = cursor.fetchone()
-            
+
             if not row:
                 return None
-            
+
             return {
                 "id": row[0],
                 "username": row[1],
@@ -200,7 +201,8 @@ class UserService:
                 "is_admin": row[3],
                 "is_active": row[4],
                 "password_hash": row[5],
-                "created_at": row[6],
+                "email_verified": bool(row[6]),
+                "created_at": row[7],
             }
         except Exception as e:
             logger.error(f"Error fetching user by username: {str(e)}")
@@ -220,22 +222,23 @@ class UserService:
         try:
             db = get_db()
             cursor = db.execute("""
-                SELECT id, username, email, is_admin, is_active, created_at
+                SELECT id, username, email, is_admin, is_active, email_verified, created_at
                 FROM customers
                 WHERE email = ?
             """, (email,))
             row = cursor.fetchone()
-            
+
             if not row:
                 return None
-            
+
             return {
                 "id": row[0],
                 "username": row[1],
                 "email": row[2],
                 "is_admin": row[3],
                 "is_active": row[4],
-                "created_at": row[5],
+                "email_verified": bool(row[5]),
+                "created_at": row[6],
             }
         except Exception as e:
             logger.error(f"Error fetching user by email: {str(e)}")

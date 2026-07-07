@@ -147,9 +147,19 @@ def register_api_user():
             password=password,
             created_by_id=creating_admin["id"]
         )
-        
-        # TODO: Send verification email with code
-        # For now, return the verification code (should be sent via email)
+
+        # Send verification email with code
+        verification_code = user_data.get("verification_code")
+        if verification_code:
+            try:
+                from shared.services.email_service import EmailService
+                EmailService.send_verification_email(
+                    email=email,
+                    code=verification_code,
+                    user_name=name
+                )
+            except Exception as email_err:
+                logger.warning(f"Could not send verification email: {email_err}")
         
         logger.info(f"New API user registered: {username} by {creating_admin_username}")
         
@@ -211,17 +221,17 @@ def verify_email():
         400: Invalid code or code expired
         401: Unauthorized
     """
-    data = request.get_json(silent=True)
-    
-    if not data:
+    if not request.is_json:
         return jsonify({
             "status": "error",
             "message": "Request body is required",
             "error_code": "MISSING_BODY"
         }), 400
-    
+
+    data = request.get_json(silent=True) or {}
+
     code = data.get("code", "").strip()
-    
+
     if not code:
         return jsonify({
             "status": "error",
@@ -287,25 +297,25 @@ def change_password():
         400: Validation error
         401: Invalid old password
     """
-    data = request.get_json(silent=True)
-    
-    if not data:
+    if not request.is_json:
         return jsonify({
             "status": "error",
             "message": "Request body is required",
             "error_code": "MISSING_BODY"
         }), 400
-    
+
+    data = request.get_json(silent=True) or {}
+
     old_password = data.get("old_password", "").strip()
     new_password = data.get("new_password", "").strip()
-    
+
     if not old_password:
         return jsonify({
             "status": "error",
             "message": "Old password is required",
             "error_code": "MISSING_OLD_PASSWORD"
         }), 400
-    
+
     if not new_password:
         return jsonify({
             "status": "error",
@@ -371,29 +381,29 @@ def change_password():
 def request_password_reset():
     """
     Request password reset by email.
-    
+
     This endpoint is public (no authentication required) to allow users
     who forgot their password to request a reset token.
-    
+
     Expected JSON body:
         email (str, required) - Email address of admin user
-    
+
     Returns:
         200: Reset email sent successfully
         400: Validation error
         404: Email not found
     """
-    data = request.get_json(silent=True)
-    
-    if not data:
+    if not request.is_json:
         return jsonify({
             "status": "error",
             "message": "Request body is required",
             "error_code": "MISSING_BODY"
         }), 400
-    
+
+    data = request.get_json(silent=True) or {}
+
     email = data.get("email", "").strip()
-    
+
     if not email:
         return jsonify({
             "status": "error",
@@ -448,17 +458,17 @@ def confirm_password_reset(token):
         200: Password reset successfully
         400: Validation error or invalid/expired token
     """
-    data = request.get_json(silent=True)
-    
-    if not data:
+    if not request.is_json:
         return jsonify({
             "status": "error",
             "message": "Request body is required",
             "error_code": "MISSING_BODY"
         }), 400
-    
+
+    data = request.get_json(silent=True) or {}
+
     new_password = data.get("new_password", "").strip()
-    
+
     if not new_password:
         return jsonify({
             "status": "error",

@@ -6,14 +6,14 @@ import pytest
 
 class TestAuthLogin:
     """Test cases for /api/auth/login endpoint."""
-    
-    def test_login_success(self, client):
+
+    def test_login_success(self, client, setup_test_user):
         """Test successful login returns valid JWT tokens."""
         response = client.post(
             '/api/auth/login',
             json={
                 'username': 'testuser',
-                'password': 'testpassword'
+                'password': 'TestPass123!'
             }
         )
         

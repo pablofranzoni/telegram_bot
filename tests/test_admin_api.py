@@ -10,7 +10,7 @@ import pytest
 from datetime import datetime, timedelta
 from shared.services.user_service import UserService, PasswordHasher, PasswordValidator
 from shared.services.email_service import EmailService
-from database.db_sqlite import get_db
+from database.db_manager import get_db
 
 
 # ============================================================================
@@ -447,7 +447,7 @@ class TestAdminDecorator:
         
         assert response.status_code == 401
     
-    def test_register_requires_verified_email(self, client, admin_auth_headers):
+    def test_register_requires_verified_email(self, client, setup_test_admin, admin_auth_headers):
         """Test that admin must have verified email to register users."""
         # This would require mocking an unverified admin
         # For now, with our setup_test_admin fixture, this should work

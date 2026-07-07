@@ -53,10 +53,10 @@ def api_token_required(f: Callable) -> Callable:
             if "Authorization" not in request.headers:
                 return jsonify({
                     "status": "error",
-                    "message": "Authorization header is missing",
-                    "error_code": "MISSING_AUTH_HEADER"
+                    "message": "Authorization token is missing",
+                    "error_code": "MISSING_AUTH_TOKEN"
                 }), 401
-            
+
             if "Bearer" not in request.headers.get("Authorization", ""):
                 return jsonify({
                     "status": "error",

@@ -29,14 +29,15 @@ class EmailService:
         cc: Optional[List[str]] = None,
         bcc: Optional[List[str]] = None,
         attachments: Optional[List[EmailAttachmentDTO]] = None,
+        email_type: str = "general",
         smtp_client_factory=None  # For testing/mocking
     ) -> EmailSendResult:
         """
         Send an email with optional CC, BCC, and attachments.
-        
+
         This is a mock implementation for development. In production,
         this would integrate with real SMTP service.
-        
+
         Args:
             subject: Email subject line
             body_text: Email body (plain text)
@@ -44,8 +45,9 @@ class EmailService:
             cc: List of CC recipients (optional)
             bcc: List of BCC recipients (optional)
             attachments: List of EmailAttachmentDTO objects (optional)
+            email_type: Logical email category (e.g. "verification", "password_reset")
             smtp_client_factory: For testing (not used in mock)
-        
+
         Returns:
             EmailSendResult with success status, recipients, and attachment count
         """
@@ -56,22 +58,22 @@ class EmailService:
                 all_recipients.extend(cc)
             if bcc:
                 all_recipients.extend(bcc)
-            
+
             # Build email content
             email_body = body_text
-            
+
             # Add attachment info to body for visibility
             if attachments:
                 email_body += f"\n\n--- Attachments ({len(attachments)}) ---\n"
                 for att in attachments:
                     email_body += f"  • {att.filename} ({att.mime_type})\n"
-            
+
             # Log the email (mock implementation)
             EmailService._log_email(
                 email=", ".join(to) if to else "no-recipients",
                 subject=subject,
                 body=email_body,
-                email_type="general",
+                email_type=email_type,
                 cc=cc,
                 bcc=bcc,
                 attachment_count=len(attachments or [])
@@ -130,11 +132,12 @@ Bot Administration Team
             result = EmailService.send_email(
                 subject=subject,
                 body_text=body,
-                to=[email]
+                to=[email],
+                email_type="verification"
             )
-            
+
             return result.success
-            
+
         except Exception as e:
             logger.error(f"Failed to send verification email to {email}: {str(e)}")
             return False
@@ -184,11 +187,12 @@ Bot Administration Team
             result = EmailService.send_email(
                 subject=subject,
                 body_text=body,
-                to=[email]
+                to=[email],
+                email_type="password_reset"
             )
-            
+
             return result.success
-            
+
         except Exception as e:
             logger.error(f"Failed to send password reset email to {email}: {str(e)}")
             return False

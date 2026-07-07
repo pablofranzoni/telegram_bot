@@ -17,9 +17,13 @@ os.environ['TELEGRAM_WEBHOOK_PATH_TOKEN'] = 'test-webhook-path-token'
 os.environ['TELEGRAM_WEBHOOK_SECRET_TOKEN'] = 'test-webhook-secret-token'
 os.environ['FLASK_ENV'] = 'testing'
 
+# Force DB to use SQLite in-memory for tests (overrides .env pointing to PostgreSQL)
+os.environ['DB_TYPE'] = 'sqlite'
+os.environ['DATABASE_PATH'] = ':memory:'
+
 TEST_INVOICE_ID = "550e8400-e29b-41d4-a716-446655440000"
-TEST_API_USER = "test_user"
-TEST_API_PASSWORD = "test_password"
+TEST_API_USER = "testuser"
+TEST_API_PASSWORD = "TestPass123!"
 TEST_ADMIN_USER = "admin_user"
 TEST_ADMIN_PASSWORD = "AdminPass123!"
 TEST_ADMIN_EMAIL = "admin@example.com"
@@ -56,9 +60,14 @@ def sample_invoice_items() -> list[dict[str, object]]:
     ]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def app() -> Flask:
-    """Create a test Flask application with JWT configured."""
+    """Create a test Flask application with JWT configured and a fresh in-memory DB.
+
+    Function scope so each test gets a clean database. The global
+    ``db_manager`` singleton is reset on teardown to avoid leaking state
+    between tests.
+    """
     from flask import Flask
     from flask_jwt_extended import JWTManager
     from routes.auth_routes import auth_bp
@@ -67,16 +76,36 @@ def app() -> Flask:
     from routes.categories_routes import categories_bp
     from routes.invoices_routes import invoices_bp
     from routes.csv_routes import csv_bp
-    
+    from database.db_manager import db_manager
+    from shared.services.email_service import EmailService
+
     app = Flask(__name__, template_folder='templates', static_folder='static')
     app.config['TESTING'] = True
     app.config['JWT_SECRET_KEY'] = 'test-secret-key'
     app.config['JWT_ALGORITHM'] = 'HS256'
     app.config['JWT_ACCESS_TOKEN_EXPIRES'] = 3600
-    
+    app.config['DB_TYPE'] = 'sqlite'
+    app.config['DATABASE_PATH'] = ':memory:'
+
+    # Reset DB singleton for a clean slate
+    db_manager._db = None
+
+    # Load schema into a long-lived in-memory connection
+    schema_path = os.path.join(os.path.dirname(__file__), '..', 'pedidos_bot.sql')
+    with open(schema_path, 'r', encoding='utf-8') as f:
+        schema_sql = f.read()
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.executescript(schema_sql)
+    conn.commit()
+    db_manager._db = _build_persistent_db(conn)
+
+    # Clear in-memory email storage between tests
+    EmailService.clear_sent_emails()
+
     # Initialize JWT
     jwt = JWTManager(app)
-    
+
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api')
     app.register_blueprint(admin_bp, url_prefix='/api')
@@ -84,8 +113,79 @@ def app() -> Flask:
     app.register_blueprint(categories_bp, url_prefix='/api')
     app.register_blueprint(invoices_bp, url_prefix='/api')
     app.register_blueprint(csv_bp, url_prefix='/api')
-    
-    return app
+
+    yield app
+
+    # Teardown: close DB connection and reset singleton
+    try:
+        db_manager._db.close_all_connections()
+    except Exception:
+        pass
+    db_manager._db = None
+
+
+def _build_persistent_db(conn: sqlite3.Connection):
+    """Wrap a persistent :memory: connection in a duck-typed DB shim.
+
+    The SQLiteDatabase class opens a new connection per call, which loses
+    schema/data for :memory:. We expose the same surface used by services
+    (execute / executemany / get_cursor / close_all_connections) on top of
+    a single long-lived connection.
+    """
+    from database.db import DatabaseInterface
+    from contextlib import contextmanager
+
+    class _InMemoryDB(DatabaseInterface):
+        def __init__(self, conn: sqlite3.Connection):
+            self._conn = conn
+
+        @contextmanager
+        def get_cursor(self):
+            cur = self._conn.cursor()
+            try:
+                yield cur
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            finally:
+                cur.close()
+
+        def execute(self, query, params=(), fetchone=False, fetchall=False, param_types=None):
+            cur = self._conn.cursor()
+            try:
+                cur.execute(query, params)
+                self._conn.commit()
+                if fetchone:
+                    return cur.fetchone()
+                if fetchall:
+                    return cur.fetchall()
+                return cur
+            finally:
+                pass
+
+        def executemany(self, query, params_list):
+            cur = self._conn.cursor()
+            try:
+                cur.executemany(query, params_list)
+                self._conn.commit()
+                return cur.rowcount
+            finally:
+                cur.close()
+
+        def commit(self):
+            self._conn.commit()
+
+        def rollback(self):
+            self._conn.rollback()
+
+        def close_all_connections(self):
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
+    return _InMemoryDB(conn)
 
 
 @pytest.fixture
@@ -112,8 +212,8 @@ def auth_headers(access_token: str) -> dict[str, str]:
 
 
 @pytest.fixture
-def admin_access_token(app: Flask) -> str:
-    """Generate a valid JWT access token for admin user."""
+def admin_access_token(app: Flask, setup_test_admin) -> str:
+    """Generate a valid JWT access token for admin user (after creating admin)."""
     with app.app_context():
         token = create_access_token(identity=TEST_ADMIN_USER)
     return token
@@ -121,11 +221,37 @@ def admin_access_token(app: Flask) -> str:
 
 @pytest.fixture
 def admin_auth_headers(admin_access_token: str) -> dict[str, str]:
-    """Create Authorization headers with admin JWT token."""
+    """Create Authorization headers with admin JWT token (admin auto-created)."""
     return {
         "Authorization": f"Bearer {admin_access_token}",
         "Content-Type": "application/json"
     }
+
+
+@pytest.fixture
+def setup_test_user(app: Flask):
+    """Create a regular (non-admin) test user used by auth API tests."""
+    from shared.services.user_service import UserService
+
+    try:
+        user_data = UserService.create_api_user(
+            username=TEST_API_USER,
+            email="testuser@example.com",
+            name="Test User",
+            password=TEST_API_PASSWORD,
+            created_by_id=None,
+        )
+        from database.db_manager import get_db
+        db = get_db()
+        db.execute("""
+            UPDATE customers
+            SET email_verified = 1, is_admin = 1
+            WHERE id = ?
+        """, (user_data["id"],))
+        db.commit()
+        return user_data
+    except Exception:
+        return UserService.get_user_by_username(TEST_API_USER)
 
 
 @pytest.fixture
@@ -136,7 +262,7 @@ def setup_test_admin(app: Flask):
     Used by tests to have a verified admin to work with.
     """
     from shared.services.user_service import UserService, PasswordHasher
-    from database.db_sqlite import get_db
+    from database.db_manager import get_db
     
     # Create the admin user
     try:

@@ -1,4 +1,4 @@
-"""Unit tests for the /api/products REST endpoint.
+﻿"""Unit tests for the /api/products REST endpoint.
 
 All GET operations now require JWT authentication. See conftest.py for auth_headers fixture.
 """
@@ -40,7 +40,7 @@ class TestListProducts:
         assert response.status_code == 401
         data = response.get_json()
         assert data['status'] == 'error'
-        assert 'MISSING_AUTH_HEADER' in data.get('error_code', '')
+        assert 'MISSING_AUTH_TOKEN' in data.get('error_code', '')
     
     def test_returns_200_with_products_and_pagination(self, client, auth_headers):
         """Test that listing products returns paginated results."""
@@ -108,7 +108,7 @@ class TestGetProductById:
         assert response.status_code == 401
         data = response.get_json()
         assert data['status'] == 'error'
-        assert 'MISSING_AUTH_HEADER' in data.get('error_code', '')
+        assert 'MISSING_AUTH_TOKEN' in data.get('error_code', '')
     
     def test_get_existing_product_returns_200(self, client, auth_headers):
         """Test retrieving an existing product."""
@@ -161,7 +161,7 @@ class TestCreateProduct:
         assert response.status_code == 401
         data = response.get_json()
         assert data['status'] == 'error'
-        assert 'MISSING_AUTH_HEADER' in data.get('error_code', '')
+        assert 'MISSING_AUTH_TOKEN' in data.get('error_code', '')
     
     def test_create_product_with_invalid_token_returns_401(self, client):
         """Test that creating product with invalid JWT token returns 401."""
