@@ -17,6 +17,7 @@ from database.db_factory import DatabaseType
 from routes.csv_routes import csv_bp
 from routes.products_routes import products_bp
 from routes.categories_routes import categories_bp
+from routes.customers_routes import customers_bp
 from routes.invoices_routes import invoices_bp
 from routes.auth_routes import auth_bp
 from routes.admin_routes import admin_bp
@@ -78,6 +79,7 @@ app_flask.register_blueprint(admin_bp, url_prefix='/api')
 app_flask.register_blueprint(csv_bp, url_prefix='/api')
 app_flask.register_blueprint(products_bp, url_prefix='/api')
 app_flask.register_blueprint(categories_bp, url_prefix='/api')
+app_flask.register_blueprint(customers_bp, url_prefix='/api')
 app_flask.register_blueprint(invoices_bp, url_prefix='/api')
 
 

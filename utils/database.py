@@ -1053,6 +1053,46 @@ def get_customer_db_id_by_telegram_id(telegram_id: str) -> int | None:
         return None
 
 
+# ====================== FUNCIONES DE CUSTOMERS (READ-ONLY) ======================
+
+def get_all_customers_paginated(limit: int, offset: int) -> list:
+    """Returns a page of customers ordered by id."""
+    try:
+        db = get_db()
+        rows = _execute_db(
+            db,
+            '''
+            SELECT id, name, customer_id, email
+            FROM customers
+            ORDER BY id
+            LIMIT ? OFFSET ?
+            ''',
+            (limit, offset),
+            fetchall=True,
+            param_types=['integer', 'integer'],
+        )
+        return rows or []
+    except DatabaseError as e:
+        logger.error("Error al obtener customers paginados: %s", e)
+        return []
+
+
+def count_all_customers() -> int:
+    """Returns the total number of customers."""
+    try:
+        db = get_db()
+        result = _execute_db(
+            db,
+            'SELECT COUNT(*) AS total FROM customers',
+            (),
+            fetchone=True,
+        )
+        return int(result['total']) if result else 0
+    except DatabaseError as e:
+        logger.error("Error al contar customers: %s", e)
+        return 0
+
+
 def pago_ya_procesado(mp_payment_id: str) -> bool:
     """
     Verifica si un pago de Mercado Pago ya fue procesado (estado != 'pendiente').

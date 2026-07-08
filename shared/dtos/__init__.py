@@ -2,6 +2,7 @@
 
 from .cart_dto import CartDTO, CartItemDTO, CartMutationResult
 from .checkout_dto import CheckoutResultDTO, PaymentLinkResult
+from .customer_dto import CustomerDTO
 from .email_dto import EmailAttachmentDTO, EmailSendResult
 from .product_dto import CategoryDTO, ProductDTO
 
@@ -9,10 +10,11 @@ __all__ = [
 	"CartDTO",
 	"CartItemDTO",
 	"CartMutationResult",
-	"CategoryDTO",
+	"CheckoutResultDTO",
 	"EmailAttachmentDTO",
 	"EmailSendResult",
-	"CheckoutResultDTO",
 	"PaymentLinkResult",
 	"ProductDTO",
+	"CategoryDTO",
+	"CustomerDTO",
 ]

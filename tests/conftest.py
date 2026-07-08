@@ -74,6 +74,7 @@ def app() -> Flask:
     from routes.admin_routes import admin_bp
     from routes.products_routes import products_bp
     from routes.categories_routes import categories_bp
+    from routes.customers_routes import customers_bp
     from routes.invoices_routes import invoices_bp
     from routes.csv_routes import csv_bp
     from database.db_manager import db_manager
@@ -111,6 +112,7 @@ def app() -> Flask:
     app.register_blueprint(admin_bp, url_prefix='/api')
     app.register_blueprint(products_bp, url_prefix='/api')
     app.register_blueprint(categories_bp, url_prefix='/api')
+    app.register_blueprint(customers_bp, url_prefix='/api')
     app.register_blueprint(invoices_bp, url_prefix='/api')
     app.register_blueprint(csv_bp, url_prefix='/api')
 
