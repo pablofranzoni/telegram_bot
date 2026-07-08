@@ -6,12 +6,15 @@ from shared.dtos import ProductDTO
 from shared.services import cart_service
 
 
-def test_get_current_cart_id_normalizes_int_and_mapping(monkeypatch):
-    monkeypatch.setattr(cart_service, "obtener_pedido_actual", lambda user_id: 42)
-    assert cart_service.get_current_cart_id(123) == 42
+TEST_INVOICE_ID = "550e8400-e29b-41d4-a716-446655440000"
 
-    monkeypatch.setattr(cart_service, "obtener_pedido_actual", lambda user_id: {"id": 99})
-    assert cart_service.get_current_cart_id(123) == 99
+
+def test_get_current_cart_id_normalizes_int_and_mapping(monkeypatch):
+    monkeypatch.setattr(cart_service, "obtener_pedido_actual", lambda user_id: TEST_INVOICE_ID)
+    assert cart_service.get_current_cart_id(123) == TEST_INVOICE_ID
+
+    monkeypatch.setattr(cart_service, "obtener_pedido_actual", lambda user_id: {"id": "660e8400-e29b-41d4-a716-446655440001"})
+    assert cart_service.get_current_cart_id(123) == "660e8400-e29b-41d4-a716-446655440001"
 
 
 def test_get_cart_by_invoice_normalizes_items(monkeypatch):
@@ -43,10 +46,10 @@ def test_get_cart_by_invoice_normalizes_items(monkeypatch):
         ),
     )
 
-    result = cart_service.get_cart_by_invoice(42)
+    result = cart_service.get_cart_by_invoice(TEST_INVOICE_ID)
 
     assert result is not None
-    assert result.invoice_id == 42
+    assert result.invoice_id == TEST_INVOICE_ID
     assert result.total == Decimal("25.50")
     assert result.item_count == 2
     assert len(result.items) == 1
@@ -74,7 +77,7 @@ def test_add_product_to_cart_returns_quantities_when_successful(monkeypatch):
             stock_available=20,
         ),
     )
-    monkeypatch.setattr(cart_service, "obtener_pedido_actual_o_crear_nuevo", lambda user_id: 42)
+    monkeypatch.setattr(cart_service, "obtener_pedido_actual_o_crear_nuevo", lambda user_id: TEST_INVOICE_ID)
     quantities = iter([2, 5])
     monkeypatch.setattr(cart_service, "obtener_cantidad_producto", lambda invoice_id, product_id: next(quantities))
     monkeypatch.setattr(cart_service, "agregar_producto", lambda invoice_id, product_id, quantity: True)
@@ -82,7 +85,7 @@ def test_add_product_to_cart_returns_quantities_when_successful(monkeypatch):
     result = cart_service.add_product_to_cart(user_id=123, product_id=5, quantity=3)
 
     assert result.success is True
-    assert result.invoice_id == 42
+    assert result.invoice_id == TEST_INVOICE_ID
     assert result.previous_quantity == 2
     assert result.current_quantity == 5
     assert result.product is not None
@@ -109,7 +112,7 @@ def test_add_product_to_cart_rejects_when_requested_quantity_exceeds_stock(monke
 
 
 def test_increase_product_quantity_delegates_to_add_when_missing(monkeypatch):
-    monkeypatch.setattr(cart_service, "obtener_pedido_actual_o_crear_nuevo", lambda user_id: 42)
+    monkeypatch.setattr(cart_service, "obtener_pedido_actual_o_crear_nuevo", lambda user_id: TEST_INVOICE_ID)
     monkeypatch.setattr(cart_service, "obtener_cantidad_producto", lambda invoice_id, product_id: None)
 
     called: dict[str, object] = {}
@@ -127,7 +130,7 @@ def test_increase_product_quantity_delegates_to_add_when_missing(monkeypatch):
 
 
 def test_increase_product_quantity_rejects_when_stock_limit_is_exceeded(monkeypatch):
-    monkeypatch.setattr(cart_service, "obtener_pedido_actual_o_crear_nuevo", lambda user_id: 42)
+    monkeypatch.setattr(cart_service, "obtener_pedido_actual_o_crear_nuevo", lambda user_id: TEST_INVOICE_ID)
     monkeypatch.setattr(cart_service, "obtener_cantidad_producto", lambda invoice_id, product_id: 4)
     monkeypatch.setattr(
         cart_service,
@@ -159,7 +162,7 @@ def test_decrease_product_quantity_returns_error_when_cart_is_missing(monkeypatc
 
 
 def test_decrease_product_quantity_updates_quantity_on_success(monkeypatch):
-    monkeypatch.setattr(cart_service, "get_current_cart_id", lambda user_id: 42)
+    monkeypatch.setattr(cart_service, "get_current_cart_id", lambda user_id: TEST_INVOICE_ID)
     monkeypatch.setattr(cart_service, "obtener_cantidad_producto", lambda invoice_id, product_id: 3)
     monkeypatch.setattr(
         cart_service,
@@ -202,9 +205,9 @@ def test_remove_product_from_cart_returns_success_when_database_removes_item(mon
     monkeypatch.setattr(cart_service, "obtener_cantidad_producto", lambda invoice_id, product_id: 2)
     monkeypatch.setattr(cart_service, "quitar_producto_del_pedido", lambda invoice_id, product_id: True)
 
-    result = cart_service.remove_product_from_cart(invoice_id=42, product_id=8)
+    result = cart_service.remove_product_from_cart(invoice_id=TEST_INVOICE_ID, product_id=8)
 
     assert result.success is True
-    assert result.invoice_id == 42
+    assert result.invoice_id == TEST_INVOICE_ID
     assert result.previous_quantity == 2
     assert result.current_quantity == 0

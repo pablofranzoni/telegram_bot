@@ -989,7 +989,7 @@ def count_all_invoices(estado: str | None = None, customer_id: int | None = None
         return 0
 
 
-def get_invoice_by_id_db(invoice_id: int) -> dict | None:
+def get_invoice_by_id_db(invoice_id: str) -> dict | None:
     """Returns a single invoice row joined with customer, or None if not found."""
     try:
         db = get_db()
@@ -1004,7 +1004,7 @@ def get_invoice_by_id_db(invoice_id: int) -> dict | None:
             ''',
             (invoice_id,),
             fetchone=True,
-            param_types=['integer'],
+            param_types=['text'],
         )
         return row or None
     except DatabaseError as e:
@@ -1012,7 +1012,7 @@ def get_invoice_by_id_db(invoice_id: int) -> dict | None:
         return None
 
 
-def get_invoice_items_db(invoice_id: int) -> list:
+def get_invoice_items_db(invoice_id: str) -> list:
     """Returns all items of an invoice with product details."""
     try:
         db = get_db()
@@ -1028,7 +1028,7 @@ def get_invoice_items_db(invoice_id: int) -> list:
             ''',
             (invoice_id,),
             fetchall=True,
-            param_types=['integer'],
+            param_types=['text'],
         )
         return rows or []
     except DatabaseError as e:

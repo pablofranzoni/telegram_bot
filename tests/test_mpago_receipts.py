@@ -20,7 +20,7 @@ def test_enviar_comprobante_si_corresponde_skips_when_already_sent(monkeypatch):
     )
     monkeypatch.setattr(config_module.Config, "SEND_PDF_MODE", "EMAIL")
 
-    result = service.enviar_comprobante_si_corresponde(42, "mp-123")
+    result = service.enviar_comprobante_si_corresponde("550e8400-e29b-41d4-a716-446655440000", "mp-123")
 
     assert result["success"] is True
     assert "ya enviado" in result["message"].lower()
@@ -71,11 +71,11 @@ def test_enviar_comprobante_si_corresponde_sends_email_and_registers(monkeypatch
 
     monkeypatch.setattr(database_module, "registrar_documento_enviado", fake_register)
 
-    result = service.enviar_comprobante_si_corresponde(42, "mp-123")
+    result = service.enviar_comprobante_si_corresponde("550e8400-e29b-41d4-a716-446655440000", "mp-123")
 
     assert result["success"] is True
     assert recorded == [{
-        "invoice_id": 42,
+        "invoice_id": "550e8400-e29b-41d4-a716-446655440000",
         "document_type": "receipt_pdf",
         "delivery_channel": "email",
         "recipient_target": "ana@example.com",
@@ -136,7 +136,7 @@ def test_enviar_comprobante_si_corresponde_sends_both_channels(monkeypatch):
 
     monkeypatch.setattr(database_module, "registrar_documento_enviado", fake_register)
 
-    result = service.enviar_comprobante_si_corresponde(42, "mp-123")
+    result = service.enviar_comprobante_si_corresponde("550e8400-e29b-41d4-a716-446655440000", "mp-123")
 
     assert result["success"] is True
     assert len(recorded) == 2

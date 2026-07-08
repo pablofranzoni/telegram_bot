@@ -13,7 +13,7 @@ from utils.config import Config
 from utils.database import obtener_comprobante_pedido
 
 
-def build_receipt_pdf(invoice_id: int) -> tuple[bytes | None, str | None, str | None]:
+def build_receipt_pdf(invoice_id: str) -> tuple[bytes | None, str | None, str | None]:
     """Build a simple commercial receipt PDF for a paid order."""
     invoice_info, items = obtener_comprobante_pedido(invoice_id)
     if not invoice_info or not items:
@@ -29,7 +29,8 @@ def build_receipt_pdf(invoice_id: int) -> tuple[bytes | None, str | None, str | 
     if Config.BUSINESS_EMAIL:
         pdf.cell(0, 6, f"Email: {Config.BUSINESS_EMAIL}", new_x="LMARGIN", new_y="NEXT")
 
-    invoice_label = str(get_record_value(invoice_info, 'id', invoice_id)).zfill(10)
+    raw_invoice_id = str(get_record_value(invoice_info, 'id', invoice_id))
+    invoice_label = raw_invoice_id if len(raw_invoice_id) > 10 else raw_invoice_id.zfill(10)
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"Comprobante Pedido #{invoice_label}", new_x="LMARGIN", new_y="NEXT")
@@ -73,7 +74,7 @@ def build_receipt_pdf(invoice_id: int) -> tuple[bytes | None, str | None, str | 
     return pdf_bytes, file_name, None
 
 
-def build_receipt_pdf_attachment(invoice_id: int) -> tuple[EmailAttachmentDTO | None, str | None, str | None]:
+def build_receipt_pdf_attachment(invoice_id: str) -> tuple[EmailAttachmentDTO | None, str | None, str | None]:
     """Return the receipt PDF wrapped as an email attachment."""
     pdf_bytes, file_name, error_message = build_receipt_pdf(invoice_id)
     if not pdf_bytes or not file_name:

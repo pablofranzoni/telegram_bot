@@ -98,10 +98,10 @@ def list_invoices():
 # --------------------------------------------------------------------------- #
 #  GET /api/invoices/<id>
 # --------------------------------------------------------------------------- #
-@invoices_bp.route("/invoices/<int:invoice_id>", methods=["GET"])
+@invoices_bp.route("/invoices/<string:invoice_id>", methods=["GET"])
 @api_token_required
-def get_invoice(invoice_id: int):
-    """Returns a single invoice by id, including its line items."""
+def get_invoice(invoice_id: str):
+    """Returns a single invoice by id (UUID), including its line items."""
     invoice = invoice_service.get_invoice(invoice_id)
     if invoice is None:
         return jsonify({"error": "Invoice no encontrada"}), 404
@@ -115,10 +115,10 @@ def get_invoice(invoice_id: int):
 # --------------------------------------------------------------------------- #
 #  GET /api/invoices/<id>/items
 # --------------------------------------------------------------------------- #
-@invoices_bp.route("/invoices/<int:invoice_id>/items", methods=["GET"])
+@invoices_bp.route("/invoices/<string:invoice_id>/items", methods=["GET"])
 @api_token_required
-def get_invoice_items(invoice_id: int):
-    """Returns only the line items of an invoice."""
+def get_invoice_items(invoice_id: str):
+    """Returns only the line items of an invoice (id is a UUID)."""
     invoice = invoice_service.get_invoice(invoice_id)
     if invoice is None:
         return jsonify({"error": "Invoice no encontrada"}), 404
