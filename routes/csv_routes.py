@@ -165,50 +165,6 @@ def list_uploads():
     
     return jsonify({'uploads': result})
 
-@csv_bp.route('/customers', methods=['GET'])
-@api_token_required
-def list_customers():
-    """Listar clientes"""
-    db = get_db()
-    
-    # Parámetros de paginación
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    offset = (page - 1) * per_page
-    
-    # Contar total
-    total = db.execute("SELECT COUNT(*) FROM customers", fetchone=True)[0]
-    
-    # Obtener clientes
-    customers = db.execute("""
-        SELECT id, customer_id, name, email, city, country, created_at
-        FROM customers
-        ORDER BY created_at DESC
-        LIMIT ? OFFSET ?
-    """, (per_page, offset), fetchall=True)
-    
-    result = []
-    for customer in customers:
-        result.append({
-            'id': customer[0],
-            'customer_id': customer[1],
-            'name': customer[2],
-            'email': customer[3],
-            'city': customer[4],
-            'country': customer[5],
-            'created_at': customer[6]
-        })
-    
-    return jsonify({
-        'customers': result,
-        'pagination': {
-            'page': page,
-            'per_page': per_page,
-            'total': total,
-            'pages': (total + per_page - 1) // per_page
-        }
-    })
-
 @csv_bp.route('/stats', methods=['GET'])
 @api_token_required
 def get_stats():
