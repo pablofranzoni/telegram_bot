@@ -38,6 +38,9 @@ CREATE INDEX IF NOT EXISTS idx_customers_email_verified ON customers(email_verif
 CREATE INDEX IF NOT EXISTS idx_customers_password_reset_token ON customers(password_reset_token);
 CREATE INDEX IF NOT EXISTS idx_customers_email_verification_code ON customers(email_verification_code);
 
+-- Add folio column to invoices (sequential integer receipt number)
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS folio SERIAL UNIQUE;
+
 -- Verify migration
 SELECT 'Migration completed successfully!' as status;
 SELECT COUNT(*) as total_customers FROM customers;

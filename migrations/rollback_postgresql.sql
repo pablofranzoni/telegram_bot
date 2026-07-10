@@ -30,6 +30,9 @@ ALTER TABLE customers DROP COLUMN IF EXISTS password_reset_token CASCADE;
 ALTER TABLE customers DROP COLUMN IF EXISTS password_reset_expires CASCADE;
 ALTER TABLE customers DROP COLUMN IF EXISTS created_by CASCADE;
 
+-- Drop invoices.folio column
+ALTER TABLE invoices DROP COLUMN IF EXISTS folio CASCADE;
+
 -- Verify rollback
 SELECT 'Rollback completed successfully!' as status;
 SELECT COUNT(*) as total_customers FROM customers;

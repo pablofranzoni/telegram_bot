@@ -331,7 +331,7 @@ def obtener_comprobante_pedido(invoice_id):
         db = get_db()
         invoice_id_type = _invoice_param_type(invoice_id)
         info_pedido = db.execute('''
-            SELECT i.id, i.fecha, i.estado, i.total,
+            SELECT i.id, i.folio, i.fecha, i.estado, i.total,
                    c.name, c.email, c.address, c.company, c.customer_id,
                    p.mp_payment_id, p.estado AS payment_estado,
                    p.fecha_aprobacion, p.concepto, p.monto

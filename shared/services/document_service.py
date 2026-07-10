@@ -29,8 +29,10 @@ def build_receipt_pdf(invoice_id: str) -> tuple[bytes | None, str | None, str | 
     if Config.BUSINESS_EMAIL:
         pdf.cell(0, 6, f"Email: {Config.BUSINESS_EMAIL}", new_x="LMARGIN", new_y="NEXT")
 
-    raw_invoice_id = str(get_record_value(invoice_info, 'id', invoice_id))
-    invoice_label = raw_invoice_id if len(raw_invoice_id) > 10 else raw_invoice_id.zfill(10)
+    folio_raw = get_record_value(invoice_info, 'folio', None)
+    if folio_raw is None:
+        folio_raw = get_record_value(invoice_info, 'id', invoice_id)
+    invoice_label = str(folio_raw).zfill(10)
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 14)
     pdf.cell(0, 10, f"Comprobante Pedido #{invoice_label}", new_x="LMARGIN", new_y="NEXT")

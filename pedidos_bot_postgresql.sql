@@ -97,6 +97,7 @@ CREATE EXTENSION IF NOT EXISTS pg_uuidv7;
 -- Tabla invoices (Modificada a UUID v7)
 CREATE TABLE IF NOT EXISTS invoices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v7(), -- Generación automática con tu extensión
+    folio SERIAL UNIQUE,
     customer_id INTEGER NOT NULL REFERENCES customers(id),
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     estado VARCHAR(20) DEFAULT 'pendiente',

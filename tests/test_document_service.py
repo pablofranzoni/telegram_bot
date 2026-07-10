@@ -52,6 +52,7 @@ def test_build_receipt_pdf_generates_pdf_bytes(monkeypatch):
         lambda invoice_id: (
             {
                 "id": invoice_id,
+                "folio": 42,
                 "fecha": "2026-04-08 12:00:00",
                 "estado": "completado",
                 "payment_estado": "aprobado",
@@ -80,7 +81,7 @@ def test_build_receipt_pdf_generates_pdf_bytes(monkeypatch):
     pdf_bytes, file_name, error_message = document_service.build_receipt_pdf("550e8400-e29b-41d4-a716-446655440000")
 
     assert error_message is None
-    assert file_name == "comprobante_pedido_550e8400-e29b-41d4-a716-446655440000.pdf"
+    assert file_name == "comprobante_pedido_0000000042.pdf"
     assert pdf_bytes is not None
     assert pdf_bytes.startswith(b"%PDF")
 
@@ -92,6 +93,7 @@ def test_build_receipt_pdf_contains_expected_content(monkeypatch):
         lambda invoice_id: (
             {
                 "id": invoice_id,
+                "folio": 42,
                 "fecha": "2026-04-08 12:00:00",
                 "estado": "completado",
                 "payment_estado": "aprobado",
@@ -126,7 +128,7 @@ def test_build_receipt_pdf_contains_expected_content(monkeypatch):
 
     pdf_text = _extract_pdf_text(pdf_bytes)
 
-    assert "Comprobante Pedido #550e8400-e29b-41d4-a716-446655440000" in pdf_text
+    assert "Comprobante Pedido #0000000042" in pdf_text
     assert "Fecha: 2026-04-08 12:00:00" in pdf_text
     assert "Cliente: Ana Perez" in pdf_text
     assert "Email: ana@example.com" in pdf_text

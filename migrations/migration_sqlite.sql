@@ -1,7 +1,7 @@
 -- ===========================================================================
 -- SQLite Migration Script - Add Admin Authentication Fields
 -- ===========================================================================
--- This script migrates the customers table to support JWT-secured admin 
+-- This script migrates the customers table to support JWT-secured admin
 -- authentication with email verification and password reset functionality.
 --
 -- WARNING: Always backup your database before running migrations!
@@ -37,6 +37,15 @@ CREATE INDEX IF NOT EXISTS idx_customers_is_admin ON customers(is_admin);
 CREATE INDEX IF NOT EXISTS idx_customers_email_verified ON customers(email_verified);
 CREATE INDEX IF NOT EXISTS idx_customers_password_reset_token ON customers(password_reset_token);
 CREATE INDEX IF NOT EXISTS idx_customers_email_verification_code ON customers(email_verification_code);
+
+-- Add folio column to invoices (sequential integer receipt number)
+ALTER TABLE invoices ADD COLUMN folio INTEGER;
+
+-- Backfill folio with the existing id (preserves current data)
+UPDATE invoices SET folio = id WHERE folio IS NULL;
+
+-- Enforce uniqueness and non-null after backfill (SQLite ignores NULL UNIQUE, so safe)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_folio ON invoices(folio);
 
 -- Verify migration
 SELECT 'Migration completed successfully!' as status;

@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS "invoice_items" (
 );
 CREATE TABLE IF NOT EXISTS "invoices" (
 	"id"	INTEGER,
+	"folio"	INTEGER UNIQUE,
 	"customer_id"	INTEGER NOT NULL,
 	"fecha"	TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	"estado"	TEXT DEFAULT 'pendiente',
@@ -172,5 +173,8 @@ CREATE INDEX IF NOT EXISTS "idx_logs_date" ON "upload_logs" (
 );
 CREATE INDEX IF NOT EXISTS "idx_logs_status" ON "upload_logs" (
 	"status"
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_invoices_folio" ON "invoices" (
+	"folio"
 );
 COMMIT;

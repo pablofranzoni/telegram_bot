@@ -93,6 +93,9 @@ FROM customers_old;
 -- Step 4: Drop old table
 DROP TABLE customers_old;
 
+-- Drop invoices.folio index
+DROP INDEX IF EXISTS idx_invoices_folio;
+
 -- Drop indexes from migration
 DROP INDEX IF EXISTS idx_customers_username;
 DROP INDEX IF EXISTS idx_customers_email;
