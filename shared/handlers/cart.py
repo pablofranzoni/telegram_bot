@@ -474,7 +474,7 @@ async def ejecutar_finalizar_pedido(update, context):
                     "✅ *¡Pedido confirmado!*\n\n"
                     "Tu pedido ha sido registrado correctamente.\n"
                     "Por favor, procede al pago para completar tu compra.\n\n"
-                    "Te contactaremos para la entrega apenas confirmemos el pago.\n\n"
+                    "*Te contactaremos para la entrega apenas confirmemos el pago.*\n\n"
                     "¡Gracias por tu compra! 🎉",
                     reply_markup=keyboard,
                     parse_mode='Markdown',
