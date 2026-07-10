@@ -117,7 +117,7 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
     app.add_handler(products_conv_handler)  
     
     app.add_handler(CallbackQueryHandler(manejar_confirmacion_eliminar, pattern='^(confirm_del_|cancel_del)'))
-    app.add_handler(CallbackQueryHandler(manejar_confirmacion_finalizar_pedido, pattern=r'^(confirm_finalize_\d+|cancel_finalize)$'))
+    app.add_handler(CallbackQueryHandler(manejar_confirmacion_finalizar_pedido, pattern=r'^(confirm_finalize_.+|cancel_finalize)$'))
     app.add_handler(CallbackQueryHandler(finalizar_pedido, pattern='^finalizar_'))
     app.add_handler(CallbackQueryHandler(manejar_botones_carrito))
 

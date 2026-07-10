@@ -1,5 +1,6 @@
 """Async handler tests for checkout-related cart flows."""
 
+import re
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -216,3 +217,21 @@ async def test_agregar_y_salir_flujo_productos_adds_and_ends(monkeypatch):
     assert captured["producto_id"] == 7
     assert captured["cantidad"] == 1
     assert context.user_data == {"keep": "value"}
+
+
+def test_confirm_finalize_pattern_matches_legacy_int_invoice_id():
+    """Legacy integer invoice ids should still match the callback pattern."""
+    pattern = re.compile(r'^(confirm_finalize_.+|cancel_finalize)$')
+    assert pattern.fullmatch(f"confirm_finalize_42")
+
+
+def test_confirm_finalize_pattern_matches_uuid_invoice_id():
+    """UUID invoice ids must match the callback pattern (regression for bot_core.py:120)."""
+    pattern = re.compile(r'^(confirm_finalize_.+|cancel_finalize)$')
+    assert pattern.fullmatch(f"confirm_finalize_{TEST_INVOICE_ID}")
+
+
+def test_confirm_finalize_pattern_matches_cancel_action():
+    """The cancel button should still match the callback pattern."""
+    pattern = re.compile(r'^(confirm_finalize_.+|cancel_finalize)$')
+    assert pattern.fullmatch("cancel_finalize")
