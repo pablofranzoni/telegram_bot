@@ -5,14 +5,16 @@ import traceback
 import json
 import html
 from decimal import Decimal
+from pathlib import Path
 from typing import cast
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 
 from shared.handlers.products import obtener_categorias
+from shared.dtos import CartMutationResult
 from shared.services.cart_service import (
     add_product_to_cart,
     clear_cart,
@@ -25,6 +27,7 @@ from shared.services.cart_service import (
 )
 from shared.services.catalog_service import get_product_by_id
 from shared.services.checkout_service import finalize_checkout
+from utils.config import Config
 from utils.logging_config import configure_logging
 
 configure_logging()
@@ -32,6 +35,8 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 DEVELOPER_CHAT_ID = 7225069015
+
+PRODUCT_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp')
 
 
 def _get_user_data(context: ContextTypes.DEFAULT_TYPE) -> MutableMapping[str, object]:
@@ -61,7 +66,14 @@ async def _safe_edit_callback_message(
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = None,
 ) -> None:
-    """Edit callback message and gracefully fallback when Telegram rejects the edit."""
+    """Edit the callback message, falling back to ``edit_message_caption`` for media.
+
+    The handler tries to edit the message as text first. When the source is a
+    media message (e.g. a product photo with a caption) Telegram rejects
+    ``edit_message_text`` with ``BadRequest: There is no text in the message to
+    edit``; in that case the handler retries with ``edit_message_caption`` so
+    the photo is preserved and only the caption (and the keyboard) is updated.
+    """
     try:
         await query.edit_message_text(
             text=text,
@@ -74,6 +86,25 @@ async def _safe_edit_callback_message(
         # Telegram raises this when the new message equals the current one.
         if "message is not modified" in error_text:
             logger.debug("Skipping edit_message_text because message did not change")
+            return
+
+        # Source message has no text body (e.g. it's a photo with a caption).
+        # Retry with edit_message_caption so the image stays and only the
+        # caption/keyboard are updated.
+        if "there is no text in the message to edit" in error_text:
+            await _try_edit_caption(
+                query, text, reply_markup=reply_markup, parse_mode=parse_mode
+            )
+            return
+
+        # Message is too long for either text body or caption. The mutation
+        # already succeeded; just log and leave the previous message in place
+        # rather than surfacing a generic error to the user.
+        if "message is too long" in error_text or "caption is too long" in error_text:
+            logger.warning(
+                "Skipping edit_message_text because the rendered content is too long",
+                extra={"preview": text[:80]},
+            )
             return
 
         # Some callback origins are not editable (or no longer exist); send a new message instead.
@@ -92,12 +123,48 @@ async def _safe_edit_callback_message(
         raise
 
 
+async def _try_edit_caption(
+    query: CallbackQuery,
+    text: str,
+    *,
+    reply_markup: InlineKeyboardMarkup | None,
+    parse_mode: str | None,
+) -> None:
+    """Edit a media message's caption with the same fallback rules as text edits."""
+    try:
+        await query.edit_message_caption(
+            caption=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+    except BadRequest as caption_exc:
+        caption_error_text = str(caption_exc).lower()
+        if "message is not modified" in caption_error_text:
+            logger.debug("Skipping edit_message_caption because caption did not change")
+            return
+        if "caption is too long" in caption_error_text or "message is too long" in caption_error_text:
+            logger.warning(
+                "Skipping edit_message_caption because the caption is too long",
+                extra={"preview": text[:80]},
+            )
+            return
+        logger.exception(
+            "Unexpected telegram BadRequest while editing callback caption",
+        )
+        raise
+
+
 async def _safe_answer_callback(query: CallbackQuery, text: str | None = None) -> None:
     """Answer callback queries without breaking flows when already answered."""
     try:
         await query.answer(text)
     except BadRequest:
         logger.debug("Skipping callback answer because it was already answered or expired")
+    except TelegramError:
+        logger.debug(
+            "Skipping callback answer because Telegram rejected the call",
+            exc_info=True,
+        )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log the error and send a telegram message to notify the developer."""
@@ -141,21 +208,31 @@ async def manejar_botones_carrito(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     data = query.data
 
+    if data == 'noop':
+        return
+
     if data.startswith('rem_'):
         producto_id = int(data.replace('rem_', ''))
-        await disminuir_cantidad(query, context, producto_id)
+        resultado = await disminuir_cantidad(query, context, producto_id)
+        if resultado.success:
+            await actualizar_vista_pedido(query, context, query.from_user.id)
 
     elif data.startswith('add_'):
         producto_id = int(data.replace('add_', ''))
-        await aumentar_cantidad(query, context, producto_id)
+        resultado = await aumentar_cantidad(query, context, producto_id)
+        if resultado.success:
+            await actualizar_vista_pedido(query, context, query.from_user.id)
 
     elif data.startswith('del_'):
         producto_id = int(data.replace('del_', ''))
         await eliminar_producto(query, context, producto_id)
 
     elif data.startswith('info_'):
-        producto_id = int(data.replace('info_', ''))
-        await mostrar_detalle_producto(query, context, producto_id)
+        raw_id = data.replace('info_', '', 1)
+        if raw_id.isdigit():
+            await mostrar_foto_producto(query, context, int(raw_id))
+        else:
+            await _safe_answer_callback(query, "❌ Producto no encontrado")
 
     elif data == 'vaciar_todo':
         await vaciar_pedido(query, context)
@@ -174,8 +251,8 @@ async def agregar_y_salir_flujo_productos(update: Update, context: ContextTypes.
         return ConversationHandler.END
 
     await query.answer()
-    producto_id = int(query.data.replace('add_', ''))
-    await aumentar_cantidad(query, context, producto_id)
+    producto_id = int(query.data.replace('add_', '', 1))
+    result = await aumentar_cantidad(query, context, producto_id)
 
     user_data = _get_user_data(context)
     for key in (
@@ -188,30 +265,42 @@ async def agregar_y_salir_flujo_productos(update: Update, context: ContextTypes.
     ):
         user_data.pop(key, None)
 
+    nombre_producto = result.product.name if result and result.product else "Producto"
     guidance_message = (
-        "✅ Producto agregado al pedido.\n\n"
+        f"✅ {nombre_producto} agregado al pedido.\n\n"
         "Para seguir comprando, usa /ver_productos.\n"
         "Para revisar el carrito, usa Mi Pedido o /mi_pedido."
     )
-    reply_message = getattr(query, "message", None)
-    if isinstance(reply_message, Message):
-        await reply_message.reply_text(guidance_message)
+    reply_text = getattr(getattr(query, "message", None), "reply_text", None)
+    if reply_text is not None:
+        await reply_text(guidance_message)
 
     return ConversationHandler.END
 
 
-async def disminuir_cantidad(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, producto_id: int, cantidad: int = 1):
-    """Disminuye la cantidad de un producto en el carrito."""
+async def disminuir_cantidad(
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    producto_id: int,
+    cantidad: int = 1,
+) -> CartMutationResult:
+    """Disminuye la cantidad de un producto en el carrito.
+
+    Devuelve el :class:`CartMutationResult` para que el caller (ej. el dispatcher
+    de callbacks) pueda decidir si refresca la vista del carrito.
+    """
     usuario_id = query.from_user.id
     result = decrease_product_quantity(usuario_id, producto_id, cantidad)
 
     if result.success and result.product:
-        await query.answer(
-            f"➖ {result.product.name}: {result.previous_quantity} → {result.current_quantity}"
+        await _safe_answer_callback(
+            query,
+            f"➖ {result.product.name}: {result.previous_quantity} → {result.current_quantity}",
         )
-        return
+        return result
 
-    await query.answer(result.error_message or "❌ Error al actualizar cantidad")
+    await _safe_answer_callback(query, result.error_message or "❌ Error al actualizar cantidad")
+    return result
 
 
 async def mostrar_detalle_producto(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, producto_id: int):
@@ -219,7 +308,7 @@ async def mostrar_detalle_producto(query: CallbackQuery, context: ContextTypes.D
     producto = get_product_by_id(producto_id)
 
     if not producto:
-        await query.answer("❌ Producto no encontrado")
+        await _safe_answer_callback(query, "❌ Producto no encontrado")
         return
 
     stock_disponible = producto.stock_available
@@ -243,30 +332,180 @@ async def mostrar_detalle_producto(query: CallbackQuery, context: ContextTypes.D
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.answer()
-    await query.edit_message_text(
+    await _safe_answer_callback(query)
+    await _safe_edit_callback_message(
+        query,
         mensaje,
         reply_markup=reply_markup,
         parse_mode='Markdown',
     )
 
 
-async def aumentar_cantidad(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, producto_id: int, cantidad: int = 1):
-    """Aumenta la cantidad de un producto en el carrito."""
+def _resolve_product_image(product_id: int) -> Path | None:
+    """Return the path to the product image inside the configured directory.
+
+    Files are looked up as ``<id>.<ext>`` for each entry in
+    :data:`PRODUCT_IMAGE_EXTENSIONS`. Returns ``None`` when the directory is
+    missing or no file matches. The configured directory is resolved and the
+    candidate path is verified to be inside it to prevent traversal.
+    """
+    try:
+        base = Path(Config.PRODUCT_IMAGES_DIR).expanduser().resolve()
+    except OSError:
+        logger.warning(
+            "PRODUCT_IMAGES_DIR could not be resolved: %s",
+            Config.PRODUCT_IMAGES_DIR,
+        )
+        return None
+
+    if not base.is_dir():
+        logger.debug(
+            "Imagen de producto no encontrada: directorio inexistente",
+            extra={"producto_id": product_id, "images_dir": str(base)},
+        )
+        return None
+
+    for ext in PRODUCT_IMAGE_EXTENSIONS:
+        candidate = (base / f"{product_id}{ext}").resolve()
+        try:
+            if candidate.is_file() and base in candidate.parents:
+                logger.debug(
+                    "Imagen de producto encontrada",
+                    extra={
+                        "producto_id": product_id,
+                        "image_path": str(candidate),
+                        "extension": ext,
+                    },
+                )
+                return candidate
+        except OSError:
+            continue
+        logger.debug(
+            "Imagen de producto no encontrada: probando siguiente extension",
+            extra={"producto_id": product_id, "candidate": str(candidate), "extension": ext},
+        )
+
+    logger.debug(
+        "Imagen de producto no encontrada: ninguna extension coincide",
+        extra={
+            "producto_id": product_id,
+            "images_dir": str(base),
+            "extensions_tried": list(PRODUCT_IMAGE_EXTENSIONS),
+        },
+    )
+    return None
+
+
+async def mostrar_foto_producto(
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    producto_id: int,
+):
+    """Send the product photo with the ficha as caption (replaces text-only detail)."""
+    logger.debug(
+        "mostrar_foto_producto invoked",
+        extra={
+            "producto_id": producto_id,
+            "chat_id": getattr(query.message, "chat_id", None) if query.message else None,
+            "images_dir": Config.PRODUCT_IMAGES_DIR,
+        },
+    )
+    producto = get_product_by_id(producto_id)
+
+    if not producto:
+        logger.debug(
+            "mostrar_foto_producto: producto no encontrado",
+            extra={"producto_id": producto_id},
+        )
+        await _safe_answer_callback(query, "❌ Producto no encontrado")
+        return
+
+    chat_id = getattr(query.message, "chat_id", None) if query.message else None
+    if not chat_id:
+        logger.debug(
+            "mostrar_foto_producto: callback sin message/chat_id",
+            extra={"producto_id": producto_id},
+        )
+        await _safe_answer_callback(query, "❌ No se pudo enviar la imagen")
+        return
+
+    image_path = _resolve_product_image(producto_id)
+    if image_path is None:
+        logger.debug(
+            "mostrar_foto_producto: sin imagen para el producto",
+            extra={"producto_id": producto_id, "images_dir": Config.PRODUCT_IMAGES_DIR},
+        )
+        await _safe_answer_callback(query, "📷 Sin imagen disponible")
+        return
+
+    stock_disponible = producto.stock_available
+    disponibilidad = (
+        f"{stock_disponible} unidad(es) en stock"
+        if isinstance(stock_disponible, int)
+        else "Disponible"
+        if stock_disponible is None
+        else "Sin stock"
+    )
+
+    caption = (
+        f"*{producto.name}*\n\n"
+        f"_{producto.description}_\n\n"
+        f"*Precio:* ${producto.price:.2f}\n"
+        f"*Disponibilidad:* {disponibilidad}"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("✅ Agregar", callback_data=f'add_{producto.id}')],
+        [InlineKeyboardButton("💬 +Info", callback_data=f'info_{producto.id}')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await _safe_answer_callback(query)
+    try:
+        with image_path.open('rb') as photo_file:
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo_file,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode='Markdown',
+            )
+    except (OSError, BadRequest) as exc:
+        logger.exception(
+            "Error enviando imagen del producto",
+            extra={"producto_id": producto_id, "image_path": str(image_path)},
+        )
+        await _safe_answer_callback(query, "❌ No se pudo enviar la imagen")
+
+
+async def aumentar_cantidad(
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    producto_id: int,
+    cantidad: int = 1,
+) -> CartMutationResult:
+    """Aumenta la cantidad de un producto en el carrito.
+
+    On success the function returns the :class:`CartMutationResult` so the
+    caller can craft its own confirmation message; it does not edit the
+    callback message (the per-product ack previously rendered with the
+    ``previous → current`` arrow is intentionally gone — the caller is
+    responsible for user-facing feedback).
+
+    On failure the function edits the message in place with the error so the
+    user still sees what went wrong when invoked from the cart dispatcher.
+    """
     usuario_id = query.from_user.id
     result = increase_product_quantity(usuario_id, producto_id, cantidad)
 
     if result.success and result.product:
-        await _safe_edit_callback_message(
-            query,
-            f"➕ {result.product.name}: {result.previous_quantity} → {result.current_quantity}",
-        )
-        return
+        return result
 
     await _safe_edit_callback_message(
         query,
         result.error_message or "❌ Error al actualizar cantidad",
     )
+    return result
 
 
 async def agregar_producto_al_pedido(query: CallbackQuery, producto_id: int, cantidad: int = 1):
@@ -336,26 +575,53 @@ async def eliminar_producto(query: CallbackQuery, context: ContextTypes.DEFAULT_
 
 
 async def mostrar_confirmacion_eliminar(query: CallbackQuery, producto_id: int, producto_nombre: str, pedido_id: int):
-    """Muestra diálogo de confirmación antes de eliminar."""
+    """Muestra diálogo de confirmación antes de quitar o eliminar.
+
+    El título y la acción del botón dependen de la cantidad actual del producto
+    en el carrito:
+
+    - ``cantidad > 1`` → "Confirmación de quitar unidad" + botón "Quitar Cantidad"
+      (decrementa en 1; el producto sigue en el carrito).
+    - ``cantidad == 1`` → "Confirmar eliminación" + botón "Eliminar" (saca el
+      producto del carrito por completo).
+    """
+    cart = get_cart_by_invoice(pedido_id)
+    cantidad_actual = 0
+    if cart is not None:
+        for item in cart.items:
+            if item.product_id == producto_id:
+                cantidad_actual = item.quantity
+                break
+
+    if cantidad_actual > 1:
+        restantes = cantidad_actual - 1
+        title = "⚠️ *Confirmación de quitar unidad*"
+        body = (
+            f"¿Quitar una unidad de **{producto_nombre}** del carrito?\n\n"
+            f"Te quedarán *{restantes}* unidad(es) en el carrito."
+        )
+        action_label = "➖ Quitar Cantidad"
+        callback_data = f'confirm_del_one_{producto_id}_{pedido_id}'
+    else:
+        title = "⚠️ *Confirmar eliminación*"
+        body = (
+            f"¿Estás seguro de eliminar **{producto_nombre}** del carrito?\n\n"
+            f"Esta acción no se puede deshacer."
+        )
+        action_label = "🗑️ Eliminar"
+        callback_data = f'confirm_del_{producto_id}_{pedido_id}'
+
     keyboard = [
         [
-            InlineKeyboardButton(
-                "✅ Sí, eliminar",
-                callback_data=f'confirm_del_{producto_id}_{pedido_id}',
-            ),
-            InlineKeyboardButton(
-                "❌ No, cancelar",
-                callback_data='cancel_del',
-            ),
+            InlineKeyboardButton(action_label, callback_data=callback_data),
+            InlineKeyboardButton("❌ Cancelar", callback_data='cancel_del'),
         ]
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"⚠️ *Confirmar eliminación*\n\n"
-        f"¿Estás seguro de eliminar **{producto_nombre}** del carrito?\n\n"
-        f"Esta acción no se puede deshacer.",
+        f"{title}\n\n{body}",
         reply_markup=reply_markup,
         parse_mode='Markdown',
     )
@@ -420,7 +686,8 @@ async def ejecutar_eliminacion(
             pedido_actual = get_current_cart(usuario_id)
 
             if not pedido_actual:
-                await query.edit_message_text(
+                await _safe_edit_callback_message(
+                    query,
                     "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
                     parse_mode='Markdown',
                 )
@@ -438,6 +705,56 @@ async def ejecutar_eliminacion(
             extra={"usuario_id": usuario_id, "pedido_id": pedido_id, "producto_id": producto_id},
         )
         await _safe_answer_callback(query, "❌ Error interno al eliminar")
+
+
+async def ejecutar_quitar_unidad(
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    producto_id: int,
+    producto_nombre: str,
+    usuario_id: int,
+):
+    """Ejecuta la quita de una unidad del producto (sin eliminarlo del carrito)."""
+    try:
+        resultado = decrease_product_quantity(usuario_id, producto_id, 1)
+
+        if resultado.success and resultado.product:
+            restantes = resultado.current_quantity or 0
+            await _safe_answer_callback(
+                query,
+                f"➖ {producto_nombre}: queda {restantes} unidad(es)",
+            )
+            pedido_actual = get_current_cart(usuario_id)
+            if not pedido_actual:
+                await _safe_edit_callback_message(
+                    query,
+                    "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
+                    parse_mode='Markdown',
+                )
+            else:
+                await actualizar_vista_pedido(query, context, usuario_id)
+        else:
+            await _safe_answer_callback(
+                query,
+                resultado.error_message or "❌ Error al quitar una unidad",
+            )
+
+    except BadRequest as exc:
+        logger.exception(
+            "BadRequest quitando una unidad del producto",
+            extra={"usuario_id": usuario_id, "producto_id": producto_id},
+        )
+        await _safe_answer_callback(query, f"❌ Error al quitar unidad: {exc}")
+    except Exception as exc:
+        logger.exception(
+            "Error quitando una unidad del producto",
+            extra={
+                "usuario_id": usuario_id,
+                "producto_id": producto_id,
+                "exception_type": type(exc).__name__,
+            },
+        )
+        await _safe_answer_callback(query, "❌ Error interno al quitar unidad")
 
 
 async def ejecutar_finalizar_pedido(update, context):
@@ -510,7 +827,8 @@ async def actualizar_vista_pedido(query: CallbackQuery, context: ContextTypes.DE
     pedido_actual = get_current_cart(usuario_id)
 
     if not pedido_actual:
-        await query.edit_message_text(
+        await _safe_edit_callback_message(
+            query,
             "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
             parse_mode='Markdown',
         )
@@ -543,6 +861,11 @@ async def actualizar_vista_pedido(query: CallbackQuery, context: ContextTypes.DE
     for item in items:
         nombre_corto = item.name[:10] + "..." if len(item.name) > 10 else item.name
         keyboard.append([
+            InlineKeyboardButton("−1", callback_data=f"rem_{item.product_id}"),
+            InlineKeyboardButton(str(item.quantity), callback_data="noop"),
+            InlineKeyboardButton("+1", callback_data=f"add_{item.product_id}"),
+        ])
+        keyboard.append([
             InlineKeyboardButton(f"❌  Quitar {nombre_corto}", callback_data=f'del_{item.product_id}')
         ])
 
@@ -552,7 +875,8 @@ async def actualizar_vista_pedido(query: CallbackQuery, context: ContextTypes.DE
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
+    await _safe_edit_callback_message(
+        query,
         mensaje,
         reply_markup=reply_markup,
         parse_mode='Markdown',
@@ -581,7 +905,23 @@ async def manejar_confirmacion_eliminar(update: Update, context: ContextTypes.DE
 
     data = query.data
 
-    if data.startswith('confirm_del_'):
+    if data.startswith('confirm_del_one_'):
+        partes = data.replace('confirm_del_one_', '', 1).split('_', 1)
+        if len(partes) >= 2:
+            producto_id = int(partes[0])
+            usuario_id = query.from_user.id
+            producto_info = get_product_by_id(producto_id)
+
+            if producto_info:
+                await ejecutar_quitar_unidad(
+                    query,
+                    context,
+                    producto_id,
+                    producto_info.name,
+                    usuario_id,
+                )
+
+    elif data.startswith('confirm_del_'):
         partes = data.replace('confirm_del_', '', 1).split('_', 1)
         if len(partes) >= 2:
             producto_id = int(partes[0])
@@ -657,6 +997,11 @@ async def ver_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
         producto_id = item['id']
         nombre_corto = item['nombre'][:15] + "..." if len(item['nombre']) > 15 else item['nombre']
 
+        keyboard.append([
+            InlineKeyboardButton("−1", callback_data=f"rem_{producto_id}"),
+            InlineKeyboardButton(str(item['cantidad']), callback_data="noop"),
+            InlineKeyboardButton("+1", callback_data=f"add_{producto_id}"),
+        ])
         keyboard.append([
             InlineKeyboardButton(f"❌ Eliminar {nombre_corto}", callback_data=f'del_{producto_id}')
         ])

@@ -413,10 +413,14 @@ class MercadoPagoSimple:
                         messages.append(generation_error or 'No se pudo generar el comprobante PDF.')
                     else:
                         logger.info("Enviando comprobante por Telegram", extra={"invoice_id": invoice_id, "telegram_chat_id": telegram_target, "file_name": file_name_value})
+                        folio_value = invoice_info.get('folio') if isinstance(invoice_info, dict) else None
+                        if folio_value is None:
+                            folio_value = invoice_id
+                        caption = f"Enviamos el comprobante de tu pedido #{str(folio_value).zfill(10)}"
                         telegram_ok, telegram_error = send_receipt_pdf_via_telegram(
                             telegram_chat_id,
                             attachment_value,
-                            caption=f"Comprobante de tu pedido #{str(invoice_id).zfill(10)}",
+                            caption=caption,
                         )
                         registrar_documento_enviado(
                             invoice_id=invoice_id,

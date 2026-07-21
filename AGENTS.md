@@ -1,231 +1,112 @@
-# AGENTS.md - Bot de Telegram con Webhook y Flask
-
-## Resumen del Proyecto
-
-Este proyecto consiste en el desarrollo de un bot de Telegram utilizando la biblioteca 
-`python-telegram-bot` (PTB) en su versión 20.x, operando bajo la modalidad de **webhook** en lugar de polling. El bot estará integrado en una aplicación Flask que servirá tanto para recibir las actualizaciones de Telegram como para exponer una API REST adicional.
-
-### Funcionalidades Principales:
-
-1.  **Bot de Telegram:**
-    - Manejo de comandos (ej. `/start`, `/ayuda`, `/productos`).
-    - Manejo de mensajes de texto y posibles interacciones con botones (InlineKeyboards).
-    - Envío de notificaciones proactivas a los usuarios.
-
-2.  **API de Gestión (Endpoints Adicionales):**
-    - Se implementarán endpoints RESTful para la administración de los recursos del negocio.
-    - **Clientes:** Creación, consulta, actualización y eliminación (CRUD) de clientes/usuarios del bot.
-    - **Productos:** Gestión del catálogo de productos.
-    - **Categorías:** Organización de los productos por categorías.
-    - **Pedidos:** Creación (desde el bot o el panel), consulta y actualización del estado de pedidos.
-    - **Pagos:** Registro y confirmación de pagos, posiblemente integrando un webhook de pasarela de pago.
-
-3.  **Arquitectura:**
-    - **Flask:** Actúa como servidor web principal.
-    - **python-telegram-bot:** Gestiona la lógica del bot y se integra con Flask a través de su clase `Application`.
-    - **Webhook:** Telegram enviará las actualizaciones a un endpoint específico (ej. `/webhook`), que será procesado por la aplicación de PTB.
-
-## Comandos de Compilación y Prueba
-
-El proyecto utiliza `pip` para la gestión de dependencias y `pytest` para las pruebas.
-
-### Configuración del Entorno
-
-1.  **Clonar el repositorio:**
-    ```bash
-    git clone <url-del-repositorio>
-    cd nombre-del-proyecto
-	
-2.  **Crear y activar un entorno virtual (recomendado):**
-	bash 
-	python -m venv venv
-	source venv/bin/activate  # En Windows: venv\Scripts\activate
-	
-3.  **Instalar dependencias**
-	bash
-	pip install -r requirements.txt
-	
-4.  **Variables de entorno**
-	Crear un archivo .env en la raíz del proyecto (basado en .env.example) con las siguientes variables:
-	BOT_TOKEN=<tu_token_de_bot>
-	WEBHOOK_URL=https://suffocatingly-resedaceous-mia.ngrok-free.dev/webhook
-	FLASK_APP=bot_pa.py
-	FLASK_ENV=development  # Solo para desarrollo
-	DATABASE_URL=<tu_url_de_base_de_datos>  # Ej: sqlite:///db.sqlite3
-	SECRET_KEY=<una_clave_secreta_para_flask>
-	
-## Ejecución del Proyecto
-	**Desarrollo Local (con ngrok para webhook)**
-	1.	Iniciar la aplicación Flask:
-		python bot_pa.py
-		
-	2.	Exponer el servidor local con ngrok:
-		ngrok http 5000
-		
-	3.  Configurar el Webhook en Telegram:
-		curl -F "url=<tu_url_ngrok>/webhook" https://api.telegram.org/bot<TU_TOKEN>/setWebhook
-	
-	**Producción**
-	1.	gunicorn --workers 4 --bind 0.0.0.0:8000 "app:create_app()"
-	
-	2.  Configurar el Webhook en Telegram:
-		curl -F "url=<tu_url_ngrok>/webhook" https://api.telegram.org/bot<TU_TOKEN>/setWebhook
+# AGENTS.md
+
+## Architecture at a glance
+
+- **Entry point:** `bot_pa.py` — WSGI app (`application = app_flask`) for PythonAnywhere/Gunicorn AND runnable locally (`python bot_pa.py`, Flask dev server on `0.0.0.0:5000` with reloader). It builds the Flask app, registers 7 blueprints under `/api`, and runs the Telegram `Application` in a **dedicated background event loop** (singleton) so webhook requests can dispatch updates without creating a new loop per request. The bootstrap is guarded by a `bootstrap_lock` / `bootstrap_done` flag; the Werkzeug reloader skip is keyed off `WERKZEUG_RUN_MAIN`.
+- **Bot logic:** `bot_core.py` defines `create_and_initialize_app(token, mode, initialize_app)` which wires `CommandHandler` and two `ConversationHandler`s (products, email) from handlers re-exported by `shared/handlers/commands.py` (a façade over `auth.py`, `cart.py`, `products.py`, `payments.py`).
+- **Conversation states** live in `utils/constants.py:EstadoConversacion`.
+- **Database:** `database/db_manager.py:db_manager` is a **process-wide singleton** (`DatabaseManager` with `__new__`). `database/db_factory.py:DatabaseFactory` is a **per-config cache** keyed by `f"{type}_{hash(frozenset(kwargs))}"` — calling `init_db` twice with different kwargs creates a second instance; with the same kwargs you get the cached one. Three backends: SQLite (`db_pgsql.py`-style adapter, `db_path=`), PostgreSQL (`db_url=` or `DATABASE_URL`), MySQL.
+- **Schema source of truth:** `pedidos_bot.sql` (SQLite-flavored DDL). The tests load this file into an in-memory connection — keep it in sync with the PostgreSQL `pedidos_bot_postgresql.sql` and the `migrations/` SQL when you change the schema.
+- **Two extra databases in the repo** (not SQLite, not used at runtime): `flask-sqlalchemy-postgres-moderno/` and `telegram-webhook-flask-ptb/` are vendored reference projects — do not edit them as if they were part of the app.
+
+## Key conventions / gotchas
+
+- **Bot mode is webhook-only.** `bot_core.py:create_and_initialize_app` raises `ValueError` if `bot_mode != "WEBHOOK"`. `bot_pa.py` coerces `BOT_MODE` to `WEBHOOK` and logs a warning.
+- **Webhook URL must include a path token AND a secret header.** `bot_pa.py:webhook()` requires both `TELEGRAM_WEBHOOK_PATH_TOKEN` (URL segment) and `TELEGRAM_WEBHOOK_SECRET_TOKEN` (header `X-Telegram-Bot-Api-Secret-Token`) to be set; otherwise it returns 503. The configured webhook URL is `f"{WEBHOOK_URL}/webhook/{TELEGRAM_WEBHOOK_PATH_TOKEN}"` and must start with `https://`.
+- **Default DB type is PostgreSQL** (`utils/config.py:Config.DB_TYPE = DatabaseType.POSTGRESQL` — the SQLITE line is commented out). Tests force `DB_TYPE=sqlite` + `DATABASE_PATH=:memory:` in `tests/conftest.py` before importing the app.
+- **SQL placeholders.** SQL written for SQLite uses `?`; `db_pgsql.py:_adapt_query` rewrites `?` to `%s` and strips `INSERT OR IGNORE`. Don't use psycopg2 `%`-formatting style by hand in new code — the adapter handles it.
+- **Response formatting for bot output.** Use `utils/formatters.py:TelegramTable(rows, headers=None)` for tabular results (categories, products, etc.). Build via `RowAdapterFactory.create(row, headers)` for sqlite3.Row / psycopg2 RealDictRow / plain tuples. Empty rows render as `<pre>Sin resultados</pre>`.
+- **Auth on `/api/*` routes** uses `@api_token_required` (JWT, `shared/decorators.py`) and optionally `@admin_required` (must come **after** `@api_token_required`). The login route is `/api/auth/login` (`routes/auth_routes.py`).
+- **MercadoPago** webhook is `/mercadopago-webhook/` (trailing slash — keep it). Return URLs are `/okpago`, `/failpago`, `/pendpago`. Signature validation lives in `utils/mpago.py:verificar_firma`.
+- **First admin:** `python create_first_admin.py` — interactive, requires DB reachable and no existing admin (`is_admin=1`) in `customers`. The script is blocked if any admin row already exists; the docs/AGENTS files mention a "first superadmin" but the only programmatic alternative is POST `/api/register` with an existing admin's JWT.
+- **Logging is configured once per process** by `utils/logging_config.py:configure_logging()`. Both `bot_pa.py` and `bot_core.py` call it at import time; calling it again from a worker that already has handlers just re-sets the level. `httpx` is forced to WARNING. Level comes from `LOG_LEVEL` env, falling back to `DEBUG` if `DEBUG_MODE` else `INFO`.
+
+## Commands
+
+Run from project root (Windows PowerShell 5.1):
+
+```powershell
+# Install
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Local dev (Flask + PTB webhook bootstrap in one process)
+python bot_pa.py
+# Expose to Telegram:
+ngrok http 5000
+# Point Telegram at it (one-shot):
+curl -F "url=https://<ngrok>/webhook/<TELEGRAM_WEBHOOK_PATH_TOKEN>" `
+     https://api.telegram.org/bot<BOT_TOKEN>/setWebhook
+# Reconfigure from a script (see getupdates.py for the same flow):
+python getupdates.py
+# Production WSGI:
+gunicorn --workers 4 --bind 0.0.0.0:8000 "bot_pa:application"
+
+# Tests (the only configured test runner — no pytest.ini/pyproject.toml)
+pytest -v
+pytest tests/test_admin_api.py -v            # single file
+pytest tests/test_admin_api.py -k login      # single test pattern
+pytest --cov=. --cov-report=term-missing
+
+# Schema / migrations
+python migrations/migrate.py --database sqlite --db-path ./pedidos_bot.db
+python migrations/migrate.py --database postgresql --connection-string "$env:DATABASE_URL"
+python migrations/verify_migration.py --database sqlite --db-path ./pedidos_bot.db
+
+# First admin
+python create_first_admin.py
+```
+
+There is **no** Black/Flake8/mypy/isort configuration in the repo (`requirements.txt` doesn't list them and there is no `pyproject.toml`/`setup.cfg`/`.flake8`). Don't add a `lint` step or assume `black .` is wired anywhere.
+
+## Required `.env` variables
+
+Used at import time in `utils/config.py` and `bot_pa.py`:
+
+- `BOT_TOKEN` — required for bot startup
+- `WEBHOOK_URL` — must be `https://`; if missing, `setup_webhook()` only logs a warning and the bot still starts
+- `TELEGRAM_WEBHOOK_PATH_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN` — **both required** for `/webhook/<token>` to accept updates (503 otherwise)
+- `SECRET_KEY` — Flask session/uploads
+- `DATABASE_URL` — required for the default PostgreSQL backend
+- `JWT_SECRET_KEY` (fallback `your-secret-key-change-in-production` — change in prod), `JWT_ACCESS_TOKEN_EXPIRES` (default 3600), `JWT_REFRESH_TOKEN_EXPIRES` (default 2592000)
+- `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (default 465), `EMAIL_FROM_NAME`, `BUSINESS_NAME`, `BUSINESS_EMAIL`, `SEND_PDF_MODE` (default `EMAIL`)
+- `MP_ACCESS_TOKEN` — MercadoPago SDK init
+- `DEBUG_MODE` (truthy values: `1/true/yes/on`) and `LOG_LEVEL` (e.g. `INFO`, `DEBUG`)
+- For PythonAnywhere: `PYTHONANYWHERE_DOMAIN` triggers `bootstrap_webhook_runtime()` on WSGI import (so PTB initializes once per worker, not per request)
+
+## Test layout
+
+- `conftest.py` (root) only adds the project root to `sys.path`.
+- `tests/conftest.py` sets test env vars **before** any app import and provides fixtures: `app` (function-scope Flask app built from a long-lived in-memory SQLite connection wrapping `pedidos_bot.sql` via a duck-typed shim — see `_build_persistent_db`), `client`, `auth_headers` / `access_token`, `admin_auth_headers` / `admin_access_token`, `setup_test_user`, `setup_test_admin`. The shim exists because `SQLiteDatabase` opens a fresh connection per call, which would lose the schema for `:memory:`.
+- Async handler tests use `@pytest.mark.asyncio` (pytest-asyncio 1.3) and build fake `Update`/`Context` objects with `SimpleNamespace` + `AsyncMock` — see `tests/test_checkout_handlers.py` for the pattern.
+- API tests use `app.test_client()` and JSON bodies. Login as the seeded admin with `username: TEST_ADMIN_USER` / `password: TEST_ADMIN_PASSWORD` from `tests/conftest.py`.
+- `EmailService.clear_sent_emails()` is called between tests to reset the in-memory mailbox.
+
+## Endpoint map (for verification)
+
+- `GET /` — landing HTML (links to `/api/*` resources)
+- `GET /health`, `GET /health_db` — health probes
+- `POST /webhook/<TELEGRAM_WEBHOOK_PATH_TOKEN>` — Telegram updates
+- `POST /mercadopago-webhook/` — MP notifications (note trailing slash)
+- `GET|POST /<estado>` — payment return URLs (`okpago`, `failpago`, `pendpago`)
+- `/api/...` — blueprints: `auth`, `admin`, `csv`, `products`, `categories`, `customers`, `invoices` (all require JWT except `auth/login`, `auth/refresh`, and registration/password-reset flows)
+
+## Things agents commonly get wrong here
+
+- Importing `from shared.handlers.commands import ...` for handlers is fine — that module is a façade. The real handler implementations live in `shared/handlers/{auth,cart,products,payments}.py`. `shared/handlers/commands_new.py` exists but is **not** the one wired up.
+- The schema has a `customers` table (API users live there) that is distinct from the bot's "cliente" concept handled by the `customers` service.
+- `utils/init_database.py` is a **standalone** SQLite bootstrap script with its own minimal schema (`productos`, `clientes`, `pedidos`) — it is **not** what the app uses at runtime. The runtime schema is `pedidos_bot.sql`.
+- Do not run `python ejemplo_corto1.py` or `python getupdates.py` against a real webhook unless you intend to reset the live `setWebhook` (the script does `deleteWebhook?drop_pending_updates=true`).
+- The `database/db_manager.py:db_manager` singleton stores the chosen DB on `_db`. Tests reset it via `db_manager._db = None` between cases — if you add code that reads the manager without `get_db()`, you may bypass test cleanup.
 
-##Pruebas y Estilo de Código
-	**Ejecutar todas las pruebas:**
-	pytest -v
-	
-	**Ejecutar pruebas con cobertura:**
-	pytest --cov=. --cov-report=term-missing
-	
-	**Formatear código con Black:**
-	black .
-	
-	**Ordenar imports con isort:**
-	isort .
-	
-	**Verificar estilo con Flake8:**
-	flake8
-	
-	**Verificar tipos con mypy:**
-	mypy .
-	
-	##El proyecto sigue las convenciones establecidas en la comunidad Python y las mejores prácticas para proyectos mantenibles.
+<!-- CODEGRAPH_START -->
+## CodeGraph
 
-	##Formato:
+In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), reach for it BEFORE grep/find or reading files when you need to understand or locate code:
 
-	-Black: Se utiliza para un formateo consistente. La línea máxima de código es 88 (por defecto de Black).
+- **MCP tool** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them, including dynamic-dispatch hops grep can't follow. Name a file or symbol in the query to read its current line-numbered source. If it's listed but deferred, load it by name via tool search.
+- **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
 
-	-isort: Para ordenar las importaciones, configurado para ser compatible con Black (perfil "black").
-
-	##Linting y Tipado:
-
-	Flake8: Para el linting del código, asegurando que se sigan las convenciones de PEP 8.
-
-	mypy: Se utiliza tipado estático. Todas las funciones y métodos deben tener type hints para sus argumentos y valores de retorno.
-
-	##Convenciones de Nomenclatura:
-
-	-snake_case para variables, funciones y métodos.
-
-	-CamelCase para clases.
-
-	-UPPER_CASE para constantes.
-
-	-Los nombres deben ser descriptivos y en inglés (o español, definiendo un estándar claro para todo el proyecto).
-
-	##Estructura del Proyecto:
-
-	-La lógica del bot debe estar modularizada (ej. handlers/, services/).
-
-	-Los endpoints de la API REST deben estar en un blueprint de Flask separado (ej. api/).
-
-	-La configuración debe centralizarse (ej. config.py).
-
-	##Documentación:
-
-	-Se debe incluir docstrings en todas las funciones, clases y módulos utilizando el formato Google (o el estándar que se defina).
-
-	-El código complejo debe incluir comentarios explicativos.
-
-	##Instrucciones de Prueba
-	
-	-Framework de Pruebas: pytest.
-
-	-Estructura: Los archivos de prueba deben residir en el directorio tests/, reflejando la estructura del proyecto (ej. tests/test_handlers.py, tests/api/test_clientes.py).
-
-	-Cobertura: Se espera una alta cobertura de código (mínimo >80%).
-
-	##Tests de Bot:
-
-	-Utilizar pytest.mark.asyncio para probar funciones asíncronas (handlers).
-
-	-Aprovechar los helpers de python-telegram-bot como Update y ContextTypes.DEFAULT_TYPE para simular actualizaciones.
-
-	-Probar la respuesta a comandos y mensajes específicos, así como la navegación por menús inline.
-
-	##Tests de API:
-
-	-Usar el cliente de prueba de Flask (app.test_client()).
-
-	-Probar los endpoints CRUD para cada recurso, verificando códigos de estado HTTP, estructura de la respuesta (JSON) y validación de datos.
-
-	##Tests de Integración:
-
-	-Configurar una base de datos en memoria (ej. SQLite) para pruebas que requieran interacción con la BD.
-
-	-Probar flujos completos que involucren tanto al bot como a la API (ej. un pedido creado desde el bot que debe ser consultable por la API).
-
-	##Consideraciones de Seguridad
-	
-	-La seguridad es un aspecto fundamental en el desarrollo de este bot y su API.
-
-	##Verificación del Webhook:
-
-	-El endpoint /webhook debe ser público, pero es crucial verificar que las solicitudes entrantes provienen realmente de los servidores de Telegram.
-
-	-Utilizar la función de verificación incorporada en python-telegram-bot que valida las peticiones.
-
-	-Configurar un secret_token al establecer el webhook y verificar el header X-Telegram-Bot-Api-Secret-Token.
-
-	##Protección de Endpoints de la API:
-
-	-Los endpoints de gestión (/api/clientes, /api/pedidos, etc.) no deben ser públicos.
-
-	##Implementar un mecanismo de autenticación robusto, como:
-
-	-API Keys: Claves secretas que deben ser enviadas en el header Authorization de cada solicitud.
-
-	-JWT (JSON Web Tokens): Para autenticación basada en sesiones de usuario.
-
-	-Implementar control de acceso basado en roles (RBAC) si es necesario.
-
-	-Validación y Sanitización de Entradas:
-
-	-Validar rigurosamente todos los datos de entrada, tanto en los handlers del bot como en los endpoints de la API.
-
-	-Utilizar librerías como pydantic o marshmallow para la definición y validación de esquemas de datos.
-
-	-Sanitizar cualquier entrada de usuario para prevenir inyección de código (SQL, NoSQL, etc.).
-
-	##Manejo Seguro de Secretos:
-
-	-NUNCA hardcodear tokens, contraseñas o claves en el código fuente.
-
-	-Todas las credenciales deben inyectarse a través de variables de entorno (.env en desarrollo, secretos del orquestador en producción).
-
-	-HTTPS Obligatorio:
-
-	-Tanto el webhook de Telegram como la comunicación con la API de gestión deben realizarse exclusivamente a través de HTTPS.
-
-	-En producción, configurar correctamente el certificado SSL en el servidor web o proxy inverso.
-
-	##Control de Acceso y Logging:
-
-	-Implementar un logging seguro que no registre información sensible (tokens, contraseñas, datos personales de clientes).
-
-	-Almacenar logs de acceso a la API con fines de auditoría, sin exponer datos críticos.
-
-	-Configurar niveles de log apropiados para producción (INFO o WARNING, nunca DEBUG).
-
-	##Protección contra Ataques Comunes:
-
-	-Implementar rate limiting en los endpoints de la API para prevenir abusos y ataques de fuerza bruta.
-
-	-Configurar cabeceras de seguridad en Flask (ej. con Flask-Talisman) para mitigar ataques como XSS, clickjacking.
-
-	-Mantener todas las dependencias actualizadas para evitar vulnerabilidades conocidas.
-
-	##Base de Datos:
-
-	-Utilizar consultas parametrizadas (o un ORM que lo haga automáticamente) para prevenir inyecciones SQL.
-
-	-Almacenar contraseñas de usuarios utilizando algoritmos de hash seguros y con salt (ej. bcrypt).
-
-	-Cifrar datos especialmente sensibles en la base de datos si es necesario.
-
-	##Respuestas del Bot al usuario
-	-Utilizar la clase TelegramTable cuando sea el resultado de opciones (categorias o productos) (enviando los parametros adecuados a la factory como en el ejemplo)
-
-	-Paginar los resultados si superan los 10 registros
-		
+If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
+<!-- CODEGRAPH_END -->

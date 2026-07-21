@@ -48,3 +48,7 @@ class Config:
     JWT_ALGORITHM = 'HS256'
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', '3600'))  # 1 hour in seconds
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', '2592000'))  # 30 days in seconds
+
+    # Product images directory (served by the `info_<id>` callback).
+    # Files are looked up as `<id>.<ext>` for each supported extension.
+    PRODUCT_IMAGES_DIR = os.getenv('PRODUCT_IMAGES_DIR', './productos_images')
