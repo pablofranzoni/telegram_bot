@@ -19,7 +19,11 @@
 - **Auth on `/api/*` routes** uses `@api_token_required` (JWT, `shared/decorators.py`) and optionally `@admin_required` (must come **after** `@api_token_required`). The login route is `/api/auth/login` (`routes/auth_routes.py`).
 - **MercadoPago** webhook is `/mercadopago-webhook/` (trailing slash — keep it). Return URLs are `/okpago`, `/failpago`, `/pendpago`. Signature validation lives in `utils/mpago.py:verificar_firma`.
 - **First admin:** `python create_first_admin.py` — interactive, requires DB reachable and no existing admin (`is_admin=1`) in `customers`. The script is blocked if any admin row already exists; the docs/AGENTS files mention a "first superadmin" but the only programmatic alternative is POST `/api/register` with an existing admin's JWT.
-- **Logging is configured once per process** by `utils/logging_config.py:configure_logging()`. Both `bot_pa.py` and `bot_core.py` call it at import time; calling it again from a worker that already has handlers just re-sets the level. `httpx` is forced to WARNING. Level comes from `LOG_LEVEL` env, falling back to `DEBUG` if `DEBUG_MODE` else `INFO`.
+- **Logging is split into two streams.** `utils/logging_config.py:configure_logging()` creates two dedicated `RotatingFileHandler`s: `logs/bot.log` for Telegram activity and `logs/api.log` for Flask API activity. Both propagate to the console via the root logger. Use `utils/logger_factory.py:get_bot_logger(__name__)` in bot handlers and `get_api_logger(__name__)` in API routes; never use `logging.getLogger(__name__)` directly in new bot/API modules. Use `log_bot_event(logger, update, action)` for high-level bot events so `telegram_user_id` is captured.
+- **Log levels are independent.** `BOT_LOG_LEVEL` (default `DEBUG`) and `API_LOG_LEVEL` (default `INFO`) control each file. `LOG_LEVEL` still acts as a fallback for both. Rotation is size-based: `LOG_MAX_BYTES` (default 10 MB) and `LOG_BACKUP_COUNT` (default 5). Set `LOG_DIR` to change the output directory (default `./logs`).
+- **Never log sensitive data.** Do not log passwords, verification codes, JWT tokens, Telegram secret tokens, or raw payment payloads (headers, bodies). MercadoPago webhook logs only topic/resource_id/result.
+- **API request traceability.** Every Flask request is logged with a `request_id` generated in `bot_pa.py:before_request` and included in the `api.log` format. Bot logs include `telegram_user_id` via `log_bot_event` / `logger` extra fields.
+- **Tests avoid writing logs.** `tests/conftest.py` sets `LOG_DIR` to a temp directory so file handlers (if ever initialized by bot imports) do not write to the repo.
 
 ## Commands
 
@@ -73,6 +77,7 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (default 465), `EMAIL_FROM_NAME`, `BUSINESS_NAME`, `BUSINESS_EMAIL`, `SEND_PDF_MODE` (default `EMAIL`)
 - `MP_ACCESS_TOKEN` — MercadoPago SDK init
 - `DEBUG_MODE` (truthy values: `1/true/yes/on`) and `LOG_LEVEL` (e.g. `INFO`, `DEBUG`)
+- `LOG_DIR` (default `./logs`), `BOT_LOG_LEVEL` (default `DEBUG`), `API_LOG_LEVEL` (default `INFO`), `LOG_MAX_BYTES` (default `10485760`), `LOG_BACKUP_COUNT` (default `5`)
 - For PythonAnywhere: `PYTHONANYWHERE_DOMAIN` triggers `bootstrap_webhook_runtime()` on WSGI import (so PTB initializes once per worker, not per request)
 
 ## Test layout
