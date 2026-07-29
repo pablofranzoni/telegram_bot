@@ -4,9 +4,9 @@
 from flask import Blueprint, jsonify, request
 from shared.services.jwt_service import JWTService
 from shared.services.user_service import UserService
-import logging
+from utils.logger_factory import get_api_logger
 
-logger = logging.getLogger(__name__)
+logger = get_api_logger(__name__)
 
 auth_bp = Blueprint("auth", __name__)
 

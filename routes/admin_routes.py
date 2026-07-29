@@ -13,9 +13,9 @@ from shared.services.user_service import (
     UserService, PasswordValidator, EmailValidator, UsernameValidator
 )
 
-import logging
+from utils.logger_factory import get_api_logger
 
-logger = logging.getLogger(__name__)
+logger = get_api_logger(__name__)
 
 admin_bp = Blueprint("admin", __name__)
 

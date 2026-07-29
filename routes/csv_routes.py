@@ -2,12 +2,12 @@ from flask import Blueprint, request, jsonify, render_template
 import os
 import csv
 import tempfile
-import logging
 from datetime import datetime
 from database.db_sqlite import get_db
 from shared.decorators import api_token_required
+from utils.logger_factory import get_api_logger
 
-logger = logging.getLogger(__name__)
+logger = get_api_logger(__name__)
 csv_bp = Blueprint('csv', __name__)
 
 def allowed_file(filename):

@@ -81,6 +81,47 @@ bootstrap_done = False
 os.makedirs(app_flask.config['UPLOAD_FOLDER'], exist_ok=True)
 
 
+@app_flask.before_request
+def _before_request() -> None:
+    """Genera un request_id por request para trazabilidad de logs de API."""
+    g.request_id = str(uuid.uuid4())
+    g.start_time = time.time()
+    set_api_request_id(g.request_id)
+
+
+@app_flask.after_request
+def _after_request(response):
+    """Loguea cada request de la API con duraci+�n, usuario y status code."""
+    duration_ms = (
+        (time.time() - g.start_time) * 1000
+        if hasattr(g, "start_time") and g.start_time is not None
+        else 0.0
+    )
+
+    user = None
+    try:
+        from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+
+        if request.blueprint:
+            verify_jwt_in_request(optional=True)
+            user = get_jwt_identity()
+    except Exception:
+        user = None
+
+    api_logger.info(
+        "API request",
+        extra={
+            "request_id": getattr(g, "request_id", None),
+            "method": request.method,
+            "path": request.path,
+            "status_code": response.status_code,
+            "duration_ms": round(duration_ms, 2),
+            "user": user,
+        },
+    )
+    return response
+
+
 #db_manager.init_db(DatabaseType.SQLITE, db_path="./pedidos_bot.db")
 db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL'))
 
