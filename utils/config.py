@@ -13,6 +13,13 @@ class Config:
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     DEBUG_MODE = os.getenv('DEBUG_MODE', 'False').strip().lower() in {'1', 'true', 'yes', 'on'}
     LOG_LEVEL = os.getenv('LOG_LEVEL')
+
+    # Logging
+    LOG_DIR = os.getenv('LOG_DIR', './logs')
+    BOT_LOG_LEVEL = os.getenv('BOT_LOG_LEVEL', os.getenv('LOG_LEVEL', 'DEBUG')).upper()
+    API_LOG_LEVEL = os.getenv('API_LOG_LEVEL', os.getenv('LOG_LEVEL', 'INFO')).upper()
+    LOG_MAX_BYTES = int(os.getenv('LOG_MAX_BYTES', '10485760'))  # 10 MB
+    LOG_BACKUP_COUNT = int(os.getenv('LOG_BACKUP_COUNT', '5'))
     
     # ============================================
     # 🎯 SOLO CAMBIA ESTA LÍNEA PARA CAMBIAR DE BD

@@ -2,9 +2,6 @@ import logging
 from typing import Any
 from database.db import DatabaseError
 from database.db_manager import get_db
-from utils.logging_config import configure_logging
-
-configure_logging()
 
 logger = logging.getLogger(__name__)
 
