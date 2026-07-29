@@ -1,12 +1,15 @@
 import os
 import asyncio
+import json
 import logging
 import threading
 import hmac
 import requests
 import atexit
+import time
+import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from flask_jwt_extended import JWTManager
 from dotenv import load_dotenv
 from telegram.ext import Application
@@ -24,6 +27,12 @@ from routes.admin_routes import admin_bp
 from utils import mpago
 from utils.logging_config import configure_logging
 from utils.config import Config
+from utils.logger_factory import (
+    get_bot_logger,
+    get_api_logger,
+    log_bot_event,
+    set_api_request_id,
+)
 
 # ==================== CONFIGURACIÓN ====================
 load_dotenv()
@@ -35,7 +44,8 @@ WEBHOOK_PATH_TOKEN = os.getenv('TELEGRAM_WEBHOOK_PATH_TOKEN')
 WEBHOOK_SECRET_TOKEN = os.getenv('TELEGRAM_WEBHOOK_SECRET_TOKEN')
 
 configure_logging()
-logger = logging.getLogger(__name__)
+logger = get_bot_logger(__name__)
+api_logger = get_api_logger("bot_pa.middleware")
 basedir = os.path.abspath(os.path.dirname(__file__))
 
 if BOT_MODE != 'WEBHOOK':
@@ -171,8 +181,7 @@ def index():
 @app_flask.route('/webhook/<string:webhook_token>', methods=['POST'])
 def webhook(webhook_token: str):
     """Endpoint principal para recibir updates de Telegram"""
-    logger.info("Webhook de Telegram recibido")
-    
+
     try:
         if not WEBHOOK_PATH_TOKEN or not WEBHOOK_SECRET_TOKEN:
             logger.error("Webhook Telegram deshabilitado: falta configuracion de seguridad")
@@ -193,29 +202,42 @@ def webhook(webhook_token: str):
         if not json_data:
             logger.error("Webhook de Telegram sin JSON")
             return 'No JSON received', 400
-        
+
+        # 2. ✅ Obtener la app TELEGRAM (ya inicializada)
+        app_ptb = get_or_create_telegram_app()
+
+        # 3. Convertir JSON a Update
+        from telegram import Update
+        update = Update.de_json(json_data, app_ptb.bot)
+
+        log_bot_event(
+            logger,
+            update,
+            "Webhook Telegram recibido",
+            extra={"update_id": json_data.get("update_id")},
+        )
+
         logger.debug(
             "Webhook Telegram payload resumido",
             extra={
+                "telegram_user_id": update.effective_user.id if update.effective_user else None,
                 "payload_keys": sorted(json_data.keys()),
                 "update_id": json_data.get("update_id"),
             },
         )
-        
-        # 2. ✅ Obtener la app TELEGRAM (ya inicializada)
-        app_ptb = get_or_create_telegram_app()
-        
-        # 3. Convertir JSON a Update
-        from telegram import Update
-        update = Update.de_json(json_data, app_ptb.bot)
-        
+
         # 4. Procesar en el loop dedicado de PTB para evitar crear loops por request
         if telegram_loop is None:
             raise RuntimeError("Loop de Telegram no inicializado")
 
         future = asyncio.run_coroutine_threadsafe(app_ptb.process_update(update), telegram_loop)
         future.result(timeout=20)
-        logger.info("Update de Telegram procesado", extra={"update_id": update.update_id})
+        log_bot_event(
+            logger,
+            update,
+            "Update de Telegram procesado",
+            extra={"update_id": update.update_id},
+        )
         return 'ok'
             
     except Exception as e:

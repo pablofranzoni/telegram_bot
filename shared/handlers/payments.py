@@ -5,11 +5,17 @@ from telegram.ext import ContextTypes
 
 from utils.mpago import MercadoPagoSimple
 from utils.database import buscar_ultimo_pago_usuario
+from utils.logger_factory import get_bot_logger, log_bot_event
+
+
+logger = get_bot_logger(__name__)
 
 
 async def cmd_estado_pago(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /estado - Verifica el estado del último pago."""
     usuario_id = update.effective_user.id
+
+    log_bot_event(logger, update, "Comando /estado recibido")
 
     pago = buscar_ultimo_pago_usuario(usuario_id)
 

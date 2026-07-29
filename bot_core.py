@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from utils.config import Config
 from utils.logging_config import configure_logging
+from utils.logger_factory import get_bot_logger
 from database.db_manager import db_manager, DatabaseType
 from utils.constants import EstadoConversacion
 from shared.handlers.commands import (
@@ -35,12 +36,15 @@ from shared.handlers.commands import (
     manejar_confirmacion_eliminar,
     manejar_confirmacion_finalizar_pedido,
     cmd_estado_pago,
-    error_handler
+    error_handler,
+    entrar_modo_modificacion,
+    procesar_modificacion_carrito,
+    manejar_boton_modificacion,
 )
 
 configure_logging()
 
-logger = logging.getLogger(__name__)
+logger = get_bot_logger(__name__)
 
 def init_database():
     """Inicializar según configuración"""
@@ -114,10 +118,29 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
         allow_reentry=True,
         name="flujo_compra"
     )
-    app.add_handler(products_conv_handler)  
-    
+    app.add_handler(products_conv_handler)
+
+    carrito_conv_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(entrar_modo_modificacion, pattern='^modificar_carrito$')
+        ],
+        states={
+            EstadoConversacion.MODIFICANDO_CARRITO.value: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_modificacion_carrito),
+                CallbackQueryHandler(manejar_boton_modificacion, pattern='^(aceptar_modificacion|cancelar_modificacion)$'),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("mi_pedido", ver_pedido),
+        ],
+        allow_reentry=True,
+        name="flujo_modificacion_carrito"
+    )
+    app.add_handler(carrito_conv_handler)
+
     app.add_handler(CallbackQueryHandler(manejar_confirmacion_eliminar, pattern='^(confirm_del_|cancel_del)'))
     app.add_handler(CallbackQueryHandler(manejar_confirmacion_finalizar_pedido, pattern=r'^(confirm_finalize_.+|cancel_finalize)$'))
+    app.add_handler(CallbackQueryHandler(ver_pedido, pattern='^confirmar_'))
     app.add_handler(CallbackQueryHandler(finalizar_pedido, pattern='^finalizar_'))
     app.add_handler(CallbackQueryHandler(manejar_botones_carrito))
 

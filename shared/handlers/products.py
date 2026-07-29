@@ -1,7 +1,6 @@
 """Handlers relacionados con la navegación por categorías y selección de productos."""
 
 from collections.abc import MutableMapping
-import logging
 from typing import cast
 
 from telegram import Message, Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -9,12 +8,10 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from shared.dtos import CategoryDTO, ProductDTO
 from utils.constants import EstadoConversacion
-from utils.logging_config import configure_logging
+from utils.logger_factory import get_bot_logger, log_bot_event
 from shared.services.catalog_service import get_product_by_id, list_categories, list_products_by_category_page
 
-configure_logging()
-
-logger = logging.getLogger(__name__)
+logger = get_bot_logger(__name__)
 
 PRODUCTS_PAGE_SIZE = 10
 
@@ -58,6 +55,8 @@ async def obtener_categorias(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if not mensaje:
         return ConversationHandler.END
+
+    log_bot_event(logger, update, "Mostrando categorias de productos")
 
     categorias = list_categories()
 
@@ -114,6 +113,13 @@ async def seleccionar_categoria(update: Update, context: ContextTypes.DEFAULT_TY
     if texto in letras:
         indice = letras.index(texto)
         categoria = categorias[indice]
+
+        log_bot_event(
+            logger,
+            update,
+            "Categoria seleccionada",
+            extra={"categoria": categoria.name},
+        )
 
         # Guardar solo el nombre de la categoría seleccionada
         user_data['categoria_seleccionada'] = categoria.name
@@ -308,9 +314,11 @@ async def seleccionar_producto(update: Update, context: ContextTypes.DEFAULT_TYP
         indice = opciones.index(texto)
         producto = productos[indice]
         user_data['producto_actual'] = producto
-        logger.info(
+        log_bot_event(
+            logger,
+            update,
             "Producto seleccionado",
-            extra={"cliente_id": cliente_id, "producto_id": producto.id, "producto_nombre": producto.name},
+            extra={"producto_id": producto.id, "producto_nombre": producto.name},
         )
 
         await mostrar_detalle_producto(update, context, producto)

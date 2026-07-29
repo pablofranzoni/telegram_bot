@@ -4,6 +4,7 @@ from decimal import Decimal
 import os
 import sys
 import sqlite3
+import tempfile
 from datetime import datetime, timedelta
 
 import pytest
@@ -20,6 +21,9 @@ os.environ['FLASK_ENV'] = 'testing'
 # Force DB to use SQLite in-memory for tests (overrides .env pointing to PostgreSQL)
 os.environ['DB_TYPE'] = 'sqlite'
 os.environ['DATABASE_PATH'] = ':memory:'
+
+# Redirect log files to a temporary directory so tests never write to ./logs
+os.environ['LOG_DIR'] = tempfile.mkdtemp(prefix='telegram_bot_logs_')
 
 TEST_INVOICE_ID = "550e8400-e29b-41d4-a716-446655440000"
 TEST_API_USER = "testuser"

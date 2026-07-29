@@ -1,11 +1,13 @@
 """Handlers relacionados con el registro / autenticación y el menú principal."""
 
+import logging
 from collections.abc import MutableMapping
 
 from telegram import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from utils.constants import EstadoConversacion
+from utils.logger_factory import get_bot_logger, log_bot_event
 from shared.services.auth_service import (
     generate_verification_code,
     get_customer_with_email,
@@ -13,6 +15,9 @@ from shared.services.auth_service import (
     register_verified_customer,
 )
 from shared.services.email_service import send_verification_email
+
+
+logger = get_bot_logger(__name__)
 
 
 def _require_message(update: Update) -> Message | None:
@@ -46,6 +51,8 @@ async def cmd_inicio_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return ConversationHandler.END
     telegram_id = usuario.id
 
+    log_bot_event(logger, update, "Comando /inicio_cliente recibido")
+
     # Buscar si ya tiene email
     datos_cliente = get_customer_with_email(telegram_id)
 
@@ -71,6 +78,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not usuario or not message:
         return ConversationHandler.END
     telegram_id = usuario.id
+
+    log_bot_event(logger, update, "Comando /start recibido")
 
     # Buscar si ya tiene email
     datos_cliente = get_customer_with_email(telegram_id)
@@ -112,7 +121,10 @@ async def recibir_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = _get_user_data(context)
     email = message.text.strip()
 
+    log_bot_event(logger, update, "Email recibido para verificacion", extra={"email_domain": email.split("@")[-1] if "@" in email else None})
+
     if not es_email_valido(email):
+        log_bot_event(logger, update, "Email invalido ingresado", level=logging.WARNING)
         await message.reply_text("❌ Email inválido. Intenta nuevamente:")
         return EstadoConversacion.ESPERANDO_EMAIL.value
 
@@ -167,6 +179,8 @@ async def verificar_codigo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             email=email,
         )
 
+        log_bot_event(logger, update, "Email verificado correctamente", extra={"email_domain": email.split("@")[-1] if "@" in email else None})
+
         user_data.clear()
 
         await message.reply_text(
@@ -177,6 +191,7 @@ async def verificar_codigo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return ConversationHandler.END
     else:
+        log_bot_event(logger, update, "Codigo de verificacion incorrecto", level=logging.WARNING)
         await message.reply_text(
             "❌ Código incorrecto. Intenta nuevamente:\n"
             "(o escribe /cancelar para abortar)"

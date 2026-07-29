@@ -6,7 +6,7 @@ import json
 import html
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -15,6 +15,8 @@ from telegram.error import BadRequest, TelegramError
 
 from shared.handlers.products import obtener_categorias
 from shared.dtos import CartMutationResult
+from utils.constants import EstadoConversacion
+from utils.logger_factory import get_bot_logger, log_bot_event
 from shared.services.cart_service import (
     add_product_to_cart,
     clear_cart,
@@ -28,11 +30,8 @@ from shared.services.cart_service import (
 from shared.services.catalog_service import get_product_by_id
 from shared.services.checkout_service import finalize_checkout
 from utils.config import Config
-from utils.logging_config import configure_logging
 
-configure_logging()
-
-logger = logging.getLogger(__name__)
+logger = get_bot_logger(__name__)
 
 DEVELOPER_CHAT_ID = 7225069015
 
@@ -154,6 +153,13 @@ async def _try_edit_caption(
         raise
 
 
+def _escape_markdown(text: str) -> str:
+    """Escape special Markdown characters to prevent parse errors."""
+    if not text:
+        return text
+    return text.replace('_', r'\_').replace('*', r'\*').replace('`', r'\`').replace('[', r'\[').replace(']', r'\]')
+
+
 async def _safe_answer_callback(query: CallbackQuery, text: str | None = None) -> None:
     """Answer callback queries without breaking flows when already answered."""
     try:
@@ -203,10 +209,12 @@ async def manejar_botones_carrito(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     if not query or not isinstance(query.data, str):
         return
-    
+
     # Siempre responde el callback para que Telegram deje de mostrar el "relojito"
     await query.answer()
     data = query.data
+
+    log_bot_event(logger, update, "Callback de carrito recibido", extra={"callback_data": data})
 
     if data == 'noop':
         return
@@ -253,6 +261,17 @@ async def agregar_y_salir_flujo_productos(update: Update, context: ContextTypes.
     await query.answer()
     producto_id = int(query.data.replace('add_', '', 1))
     result = await aumentar_cantidad(query, context, producto_id)
+
+    log_bot_event(
+        logger,
+        update,
+        "Producto agregado al carrito desde flujo de productos",
+        extra={
+            "producto_id": producto_id,
+            "producto_nombre": result.product.name if result and result.product else None,
+            "cantidad": getattr(result, "current_quantity", None) if result else None,
+        },
+    )
 
     user_data = _get_user_data(context)
     for key in (
@@ -538,6 +557,7 @@ async def vaciar_pedido(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE
         eliminado = clear_cart(usuario_id)
 
         if eliminado:
+            logger.info("Pedido vaciado", extra={"telegram_user_id": usuario_id})
             await query.answer("🗑️ Pedido vaciado")
             await query.edit_message_text(
                 "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
@@ -682,6 +702,15 @@ async def ejecutar_eliminacion(
         eliminado = remove_product_from_cart(pedido_id, producto_id)
 
         if eliminado.success:
+            logger.info(
+                "Producto eliminado del carrito",
+                extra={
+                    "telegram_user_id": usuario_id,
+                    "pedido_id": pedido_id,
+                    "producto_id": producto_id,
+                    "producto_nombre": producto_nombre,
+                },
+            )
             await _safe_answer_callback(query, f"✅ {producto_nombre} eliminado")
             pedido_actual = get_current_cart(usuario_id)
 
@@ -777,6 +806,15 @@ async def ejecutar_finalizar_pedido(update, context):
             )
 
             if resultado.success:
+                logger.info(
+                    "Pedido finalizado",
+                    extra={
+                        "telegram_user_id": telegram_id,
+                        "invoice_id": invoice_id,
+                        "monto": str(resultado.amount),
+                        "preference_id": resultado.payment_preference_id,
+                    },
+                )
                 user_data['ultimo_pago'] = {
                     'preference_id': resultado.payment_preference_id,
                     'monto': str(resultado.amount),
@@ -797,6 +835,14 @@ async def ejecutar_finalizar_pedido(update, context):
                     parse_mode='Markdown',
                 )
             else:
+                logger.warning(
+                    "No se pudo finalizar pedido",
+                    extra={
+                        "telegram_user_id": telegram_id,
+                        "invoice_id": invoice_id,
+                        "error": resultado.error_message,
+                    },
+                )
                 await query.edit_message_text(
                     "❌ *No se pudo generar el pago*\n\n"
                     f"{resultado.error_message or 'Intenta nuevamente mas tarde.'}",
@@ -823,6 +869,7 @@ async def ejecutar_finalizar_pedido(update, context):
 
 async def actualizar_vista_pedido(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, usuario_id: int):
     """Actualiza la vista del carrito después de cambios."""
+    user_data = _get_user_data(context)
 
     pedido_actual = get_current_cart(usuario_id)
 
@@ -836,38 +883,38 @@ async def actualizar_vista_pedido(query: CallbackQuery, context: ContextTypes.DE
 
     pedido_id = pedido_actual.invoice_id
     total = pedido_actual.total
-    num_items = pedido_actual.item_count
     items = pedido_actual.items
+
+    items_detalle = []
+    for item in items:
+        items_detalle.append({
+            'id': item.product_id,
+            'nombre': item.name,
+            'cantidad': item.quantity,
+            'precio': item.unit_price,
+            'subtotal': item.subtotal,
+            'descripcion': getattr(item, 'description', ''),
+        })
+
+    letras_carrito = [chr(65 + i) for i in range(len(items_detalle))]
+    user_data['carrito_letras'] = {letra: item['id'] for letra, item in zip(letras_carrito, items_detalle)}
+    user_data['carrito_items'] = items_detalle
 
     mensaje = "🛒 *Carrito Actualizado*\n\n"
 
-    #items es asi: [{'id': 28, 'total': Decimal('4.5'), 'items': 1}, ...]
-    for item in items:
-        mensaje += f"• **{item.name}**\n"
-        mensaje += f"  Cantidad: `{item.quantity}` × ${item.unit_price:.2f} = **${item.subtotal:.2f}**\n\n"
+    for letra, item in zip(letras_carrito, items_detalle):
+        mensaje += f"**{letra}) {_escape_markdown(item['nombre'])}**\n"
+        mensaje += f"   📦 Cantidad: `{item['cantidad']}` × ${item['precio']:.2f} = **${item['subtotal']:.2f}**\n\n"
 
-    mensaje += f"**Total: ${total:.2f}**\n"
-    mensaje += f"**Items: {num_items} productos**\n\n"
-    mensaje += (
-        " ¿Qué deseas hacer? Modifica tu pedido o finalízalo cuando estés listo.\n\n"
-        "Puedes eliminar productos, agregar más o proceder al pago.\n\n"
-        "/quitar para eliminar productos, /ver_productos para agregar más, o \n\n"
-        "/finalizar para completar tu compra"
-    )
+    mensaje += f"**Total: ${total:.2f}**\n\n"
+    mensaje += "Usa *Modificar* para cambiar cantidades o eliminar items.\n"
 
     keyboard = []
 
-    #items es asi: [{'id': 28, 'total': Decimal('4.5'), 'items': 1}, ...]
-    for item in items:
-        nombre_corto = item.name[:10] + "..." if len(item.name) > 10 else item.name
-        keyboard.append([
-            InlineKeyboardButton("−1", callback_data=f"rem_{item.product_id}"),
-            InlineKeyboardButton(str(item.quantity), callback_data="noop"),
-            InlineKeyboardButton("+1", callback_data=f"add_{item.product_id}"),
-        ])
-        keyboard.append([
-            InlineKeyboardButton(f"❌  Quitar {nombre_corto}", callback_data=f'del_{item.product_id}')
-        ])
+    keyboard.append([
+        InlineKeyboardButton("✅ Confirmar", callback_data=f'confirmar_{pedido_id}'),
+        InlineKeyboardButton("✏️ Modificar", callback_data='modificar_carrito'),
+    ])
 
     keyboard.append([
         InlineKeyboardButton("✅ Finalizar pedido", callback_data=f'finalizar_{pedido_id}')
@@ -875,12 +922,292 @@ async def actualizar_vista_pedido(query: CallbackQuery, context: ContextTypes.DE
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    logger.debug("Mensaje a enviar en actualizar_vista_pedido: %r", mensaje)
     await _safe_edit_callback_message(
         query,
         mensaje,
         reply_markup=reply_markup,
         parse_mode='Markdown',
     )
+
+
+async def entrar_modo_modificacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entra al modo modificación del carrito."""
+    message = _get_accessible_message(update)
+    user_data = _get_user_data(context)
+
+    if not message or not update.effective_user:
+        return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+    cliente_id = update.effective_user.id
+    cart = get_current_cart(cliente_id)
+
+    if not cart or cart.is_empty:
+        await message.reply_text(
+            "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
+            parse_mode='Markdown',
+        )
+        return ConversationHandler.END
+
+    user_data['carrito_original'] = {
+        'items': [
+            {
+                'id': item.product_id,
+                'nombre': item.name,
+                'cantidad': item.quantity,
+                'precio': item.unit_price,
+                'subtotal': item.subtotal,
+                'descripcion': item.description,
+            }
+            for item in cart.items
+        ]
+    }
+
+    await _mostrar_vista_modificacion(message, context, cliente_id)
+
+    return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+
+async def _mostrar_vista_modificacion(message: Message, context: ContextTypes.DEFAULT_TYPE, usuario_id: int):
+    """Muestra el carrito en modo modificación con instrucciones."""
+    user_data = _get_user_data(context)
+    cart = get_current_cart(usuario_id)
+
+    if not cart or cart.is_empty:
+        await message.reply_text(
+            "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
+            parse_mode='Markdown',
+        )
+        return
+
+    items_detalle = [
+        {
+            'id': item.product_id,
+            'nombre': item.name,
+            'cantidad': item.quantity,
+            'precio': item.unit_price,
+            'subtotal': item.subtotal,
+            'descripcion': item.description,
+        }
+        for item in cart.items
+    ]
+
+    letras_carrito = [chr(65 + i) for i in range(len(items_detalle))]
+    user_data['carrito_letras'] = {letra: item['id'] for letra, item in zip(letras_carrito, items_detalle)}
+    user_data['carrito_items'] = items_detalle
+
+    mensaje = "✏️ *Modo Modificación*\n\n"
+    mensaje += "Usa los siguientes comandos:\n"
+    mensaje += "• *A+* → Agregar 1 unidad del item A\n"
+    mensaje += "• *A-* → Quitar 1 unidad del item A\n"
+    mensaje += "• A\* → Eliminar item A\n\n"
+
+    total = Decimal('0.00')
+    for letra, item in zip(letras_carrito, items_detalle):
+        mensaje += f"**{letra}) {_escape_markdown(item['nombre'])}**\n"
+        if item['descripcion']:
+            mensaje += f"   _{_escape_markdown(item['descripcion'])}_\n"
+        mensaje += f"   📦 Cantidad: `{item['cantidad']}` "
+        mensaje += f"× ${item['precio']:.2f} = **${item['subtotal']:.2f}**\n\n"
+        total += item['subtotal']
+
+    mensaje += f"**Total: ${total:.2f}**\n"
+        
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Aceptar", callback_data='aceptar_modificacion'),
+            InlineKeyboardButton("❌ Cancelar", callback_data='cancelar_modificacion'),
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    logger.debug("Mensaje", extra={"texto": mensaje})
+    logger.debug("Mensaje a enviar en modo modificacion: %r", mensaje)
+    await message.reply_text(mensaje, parse_mode='Markdown', reply_markup=reply_markup)
+
+
+def _log_modificacion_result(
+    update: Update,
+    operacion: str,
+    producto_id: int,
+    result: Any,
+) -> None:
+    """Loguea el resultado de una modificación del carrito en bot.log."""
+    success = bool(getattr(result, "success", False))
+    product = getattr(result, "product", None)
+    error_message = getattr(result, "error_message", None)
+    log_bot_event(
+        logger,
+        update,
+        "Producto modificado en carrito",
+        level=logging.INFO if success else logging.WARNING,
+        extra={
+            "operacion": operacion,
+            "producto_id": producto_id,
+            "producto_nombre": getattr(product, "name", None),
+            "cantidad_anterior": getattr(result, "previous_quantity", None),
+            "cantidad_actual": getattr(result, "current_quantity", None),
+            "success": success,
+            "error": error_message if not success else None,
+        },
+    )
+
+
+async def procesar_modificacion_carrito(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa los comandos de modificación del carrito (A+, A-, A*)."""
+    message = _get_accessible_message(update)
+    user_data = _get_user_data(context)
+
+    if not message or not update.effective_user:
+        return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+    if not update.message or not update.message.text:
+        return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+    texto = update.message.text.strip().upper()
+
+    if texto in ('ACEPTAR', 'CANCELAR'):
+        return await _procesar_boton_modificacion(update, context, texto)
+
+    carrito_letras = user_data.get('carrito_letras', {})
+    letras_validas = set(carrito_letras.keys())
+
+    import re
+    match = re.match(r'^([A-Z])([\+\-\*])$', texto)
+
+    if not match:
+        log_bot_event(
+            logger,
+            update,
+            "Comando de modificacion de carrito no valido",
+            level=logging.WARNING,
+            extra={"texto_ingresado": texto},
+        )
+        await message.reply_text(
+            "❌ Comando no válido. Usa *A+*, *A-* o *A** para modificar.\n"
+            "O escribe *Aceptar* para confirmar o *Cancelar* para descartar.",
+            parse_mode='Markdown',
+        )
+        return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+    letra = match.group(1)
+    operacion = match.group(2)
+
+    if letra not in letras_validas:
+        log_bot_event(
+            logger,
+            update,
+            "Letra de carrito no valida",
+            level=logging.WARNING,
+            extra={"letra": letra, "letras_validas": sorted(letras_validas)},
+        )
+        opciones = ", ".join(sorted(letras_validas))
+        await message.reply_text(
+            f"❌ Letra *{letra}* no válida. Opciones: {opciones}",
+            parse_mode='Markdown',
+        )
+        return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+    producto_id = carrito_letras[letra]
+    usuario_id = update.effective_user.id
+
+    log_bot_event(
+        logger,
+        update,
+        "Modificacion de carrito solicitada",
+        extra={
+            "operacion": operacion,
+            "letra": letra,
+            "producto_id": producto_id,
+        },
+    )
+
+    if operacion == '+':
+        result = increase_product_quantity(usuario_id, producto_id, 1)
+        _log_modificacion_result(update, "+", producto_id, result)
+        if result.success:
+            await message.reply_text(f"➕ Agregado 1 unidad de *{result.product.name}*", parse_mode='Markdown')
+        else:
+            await message.reply_text(result.error_message or "❌ Error al agregar", parse_mode='Markdown')
+
+    elif operacion == '-':
+        result = decrease_product_quantity(usuario_id, producto_id, 1)
+        _log_modificacion_result(update, "-", producto_id, result)
+        if result.success:
+            if result.current_quantity == 0:
+                await message.reply_text(f"🗑️ *{result.product.name}* eliminado del carrito", parse_mode='Markdown')
+            else:
+                await message.reply_text(f"➖ Quitada 1 unidad de *{result.product.name}* ({result.current_quantity} restantes)", parse_mode='Markdown')
+        else:
+            await message.reply_text(result.error_message or "❌ Error al quitar", parse_mode='Markdown')
+
+    elif operacion == '*':
+        result = remove_product_from_cart(
+            get_current_cart_id(usuario_id) or 0,
+            producto_id
+        )
+        _log_modificacion_result(update, "*", producto_id, result)
+        if result.success:
+            await message.reply_text(f"🗑️ *{result.product.name}* eliminado del carrito", parse_mode='Markdown')
+        else:
+            await message.reply_text(result.error_message or "❌ Error al eliminar", parse_mode='Markdown')
+
+    cart = get_current_cart(usuario_id)
+    if not cart or cart.is_empty:
+        await message.reply_text(
+            "🛒 *Pedido vacío*\n\n¡Agrega productos para continuar!",
+            parse_mode='Markdown',
+        )
+        return ConversationHandler.END
+
+    await _mostrar_vista_modificacion(message, context, usuario_id)
+
+    return EstadoConversacion.MODIFICANDO_CARRITO.value
+
+
+async def _procesar_boton_modificacion(update: Update, context: ContextTypes.DEFAULT_TYPE, accion: str):
+    """Procesa los botones Aceptar/Cancelar del modo modificación."""
+    message = _get_accessible_message(update)
+    user_data = _get_user_data(context)
+
+    if accion == 'CANCELAR':
+        carrito_original = user_data.pop('carrito_original', None)
+        user_data.pop('carrito_letras', None)
+        user_data.pop('carrito_items', None)
+
+        if carrito_original:
+            usuario_id = update.effective_user.id
+            pedido_id = get_current_cart_id(usuario_id)
+
+            if pedido_id and carrito_original.get('items'):
+                for item in carrito_original['items']:
+                    for _ in range(item['cantidad']):
+                        add_product_to_cart(usuario_id, item['id'], 1)
+
+        await message.reply_text("❌ Cambios descartados.", parse_mode='Markdown')
+        return ConversationHandler.END
+
+    user_data.pop('carrito_original', None)
+    user_data.pop('carrito_letras', None)
+    user_data.pop('carrito_items', None)
+
+    await message.reply_text("✅ Cambios aplicados.", parse_mode='Markdown')
+    return ConversationHandler.END
+
+
+async def manejar_boton_modificacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja los botones Aceptar/Cancelar en el modo modificación."""
+    query = update.callback_query
+    if not query or not isinstance(query.data, str):
+        return
+
+    await query.answer()
+
+    if query.data == 'aceptar_modificacion':
+        return await _procesar_boton_modificacion(update, context, 'ACEPTAR')
+    elif query.data == 'cancelar_modificacion':
+        return await _procesar_boton_modificacion(update, context, 'CANCELAR')
 
 
 async def manejar_confirmacion_finalizar_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -947,6 +1274,7 @@ async def manejar_confirmacion_eliminar(update: Update, context: ContextTypes.DE
 async def ver_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Muestra el pedido actual del usuario."""
     message = _get_accessible_message(update)
+    user_data = _get_user_data(context)
 
     if not message or not update.effective_user:
         return
@@ -977,37 +1305,30 @@ async def ver_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         total += item.subtotal
 
+    letras_carrito = [chr(65 + i) for i in range(len(items_detalle))]
+    user_data['carrito_letras'] = {letra: item['id'] for letra, item in zip(letras_carrito, items_detalle)}
+    user_data['carrito_items'] = items_detalle
+
     mensaje = "🛒 *Tu Pedido Actual*\n\n"
 
-    for idx, item in enumerate(items_detalle, 1):
-        mensaje += f"**{idx}. {item['nombre']}**\n"
+    for letra, item in zip(letras_carrito, items_detalle):
+        mensaje += f"**{letra}) {_escape_markdown(item['nombre'])}**\n"
         if item['descripcion']:
-            mensaje += f"   _{item['descripcion']}_\n"
+            mensaje += f"   _{_escape_markdown(item['descripcion'])}_\n"
         mensaje += f"   📦 Cantidad: `{item['cantidad']}` "
         mensaje += f"× ${item['precio']:.2f} "
         mensaje += f"= **${item['subtotal']:.2f}**\n\n"
 
-    impuestos = Decimal(0.00)  # Aquí podrías calcular impuestos si es necesario
+    impuestos = Decimal(0.00)
     total_final = total + impuestos
     mensaje += f"• **TOTAL: ${total_final:.2f}**\n\n"
+    mensaje += "Usa *Modificar* para cambiar cantidades o eliminar items.\n"
 
     keyboard = []
 
-    for idx, item in enumerate(items_detalle, 1):
-        producto_id = item['id']
-        nombre_corto = item['nombre'][:15] + "..." if len(item['nombre']) > 15 else item['nombre']
-
-        keyboard.append([
-            InlineKeyboardButton("−1", callback_data=f"rem_{producto_id}"),
-            InlineKeyboardButton(str(item['cantidad']), callback_data="noop"),
-            InlineKeyboardButton("+1", callback_data=f"add_{producto_id}"),
-        ])
-        keyboard.append([
-            InlineKeyboardButton(f"❌ Eliminar {nombre_corto}", callback_data=f'del_{producto_id}')
-        ])
-
     keyboard.append([
-        InlineKeyboardButton("🗑️ Vaciar todo", callback_data='vaciar_todo'),
+        InlineKeyboardButton("✅ Confirmar", callback_data=f'confirmar_{cart.invoice_id}'),
+        InlineKeyboardButton("✏️ Modificar", callback_data='modificar_carrito'),
     ])
 
     keyboard.append([
@@ -1016,6 +1337,7 @@ async def ver_pedido(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    logger.debug("Mensaje a enviar en ver_pedido: %r", mensaje)
     await message.reply_text(
         mensaje,
         parse_mode='Markdown',
@@ -1039,7 +1361,7 @@ async def mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     texto = update.message.text
-    logger.debug("Mensaje de texto recibido en menu principal", extra={"texto": texto})
+    log_bot_event(logger, update, "Mensaje de texto recibido", extra={"texto": texto})
 
     if texto.lower() in ['ver productos', 'productos', 'menú', 'menu', '🛍️ ver productos']:
         await obtener_categorias(update, context)
