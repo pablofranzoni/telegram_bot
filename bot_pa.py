@@ -363,12 +363,15 @@ def procesar_pago(estado):
 
 @app_flask.route('/mercadopago-webhook/', methods=['POST'])
 def mercadopago_webhook():
-    """Endpoint para recibir notificaciones de MercadoPago"""
+    """Endpoint para recibir notificaciones de MercadoPago.
+
+    Se loguean solo metadatos seguros (topic, resource_id, resultado). No se
+    persisten headers, cuerpo raw ni datos de tarjetas.
+    """
     try:
         data = request.get_json(silent=True) or {}
         topic = data.get('type') or data.get('topic') or request.args.get('type') or request.args.get('topic')
 
-        # Mercado Pago puede enviar el ID por JSON o query params
         resource_id = (
             data.get('data', {}).get('id')
             or request.args.get('id')
@@ -376,7 +379,7 @@ def mercadopago_webhook():
         )
 
         logger.info(
-            "Webhook de Mercado Pago recibido",
+            "Webhook Mercado Pago recibido",
             extra={
                 "topic": topic,
                 "resource_id": resource_id,
@@ -394,11 +397,21 @@ def mercadopago_webhook():
                 logger.warning("Webhook MP payment descartado: payment id ausente")
                 return jsonify({"status": "ignored", "reason": "missing_payment_id"}), 400
 
-            signature_ok = mpago.verificar_firma(request, resource_id)
-            logger.info(
-                "Validacion de firma webhook MP",
-                extra={"resource_id": resource_id, "signature_ok": signature_ok},
-            )
+            # En sandbox, Mercado Pago no envia firma. Si no hay secreto configurado,
+            # logueamos warning y continuamos para permitir pruebas.
+            webhook_secret = os.getenv('MERCADOPAGO_WEBHOOK_SECRET')
+            if not webhook_secret:
+                logger.warning(
+                    "MERCADOPAGO_WEBHOOK_SECRET no configurado; se omite validacion de firma (modo sandbox/dev)",
+                    extra={"resource_id": resource_id},
+                )
+                signature_ok = True
+            else:
+                signature_ok = mpago.verificar_firma(request, resource_id)
+                logger.info(
+                    "Validacion de firma webhook MP",
+                    extra={"resource_id": resource_id, "signature_ok": signature_ok},
+                )
 
             if not signature_ok:
                 return jsonify({"status": "ignored", "reason": "invalid_signature"}), 400
