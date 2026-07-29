@@ -45,7 +45,10 @@ from .cart import (
     manejar_confirmacion_finalizar_pedido,
     manejar_confirmacion_eliminar,
     mensajes_texto,
-    error_handler
+    error_handler,
+    entrar_modo_modificacion,
+    procesar_modificacion_carrito,
+    manejar_boton_modificacion,
 )
 
 from .payments import cmd_estado_pago
@@ -88,4 +91,7 @@ __all__ = [
     "mensajes_texto",
     "cmd_estado_pago",
     "error_handler",
+    "entrar_modo_modificacion",
+    "procesar_modificacion_carrito",
+    "manejar_boton_modificacion",
 ]

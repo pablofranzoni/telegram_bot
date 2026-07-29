@@ -1075,8 +1075,8 @@ def _collect_callbacks(markup):
 
 
 @pytest.mark.asyncio
-async def test_actualizar_vista_pedido_includes_adjustment_buttons_per_item(monkeypatch):
-    """Each item must render a [−1][qty][+1] row and a [❌ Quitar] row."""
+async def test_actualizar_vista_pedido_includes_modificar_button(monkeypatch):
+    """Carrito must render Confirmar and Modificar buttons."""
     query = _build_query("noop")
     cart_dto = _build_cart_dto(
         item_count=4,
@@ -1105,26 +1105,14 @@ async def test_actualizar_vista_pedido_includes_adjustment_buttons_per_item(monk
     _, kwargs = query.edit_message_text.await_args
     markup = kwargs["reply_markup"]
     callbacks = _collect_callbacks(markup)
-    assert "rem_5" in callbacks
-    assert "add_5" in callbacks
-    assert "del_5" in callbacks
-    assert "rem_9" in callbacks
-    assert "add_9" in callbacks
-    assert "del_9" in callbacks
-    assert "noop" in callbacks
-    adjustment_rows = [
-        row for row in markup.inline_keyboard
-        if [btn.callback_data for btn in row] == ["rem_5", "noop", "add_5"]
-    ]
-    assert len(adjustment_rows) == 1
-    qty_label = adjustment_rows[0][1]
-    assert qty_label.text == "2"
-    assert qty_label.callback_data == "noop"
+    assert "confirmar_" in callbacks[0] or any("confirmar_" in cb for cb in callbacks)
+    assert "modificar_carrito" in callbacks
+    assert "finalizar_" in callbacks[0] or any("finalizar_" in cb for cb in callbacks)
 
 
 @pytest.mark.asyncio
-async def test_ver_pedido_includes_adjustment_buttons_per_item(monkeypatch):
-    """``ver_pedido`` must also render the [−1][qty][+1] row per item."""
+async def test_ver_pedido_includes_modificar_button(monkeypatch):
+    """``ver_pedido`` must render Confirmar and Modificar buttons."""
     cart_dto = SimpleNamespace(
         is_empty=False,
         invoice_id=TEST_INVOICE_ID,
@@ -1155,16 +1143,9 @@ async def test_ver_pedido_includes_adjustment_buttons_per_item(monkeypatch):
     _, kwargs = message.reply_text.await_args
     markup = kwargs["reply_markup"]
     callbacks = _collect_callbacks(markup)
-    assert "rem_5" in callbacks
-    assert "add_5" in callbacks
-    assert "del_5" in callbacks
-    assert "noop" in callbacks
-    adjustment_rows = [
-        row for row in markup.inline_keyboard
-        if [btn.callback_data for btn in row] == ["rem_5", "noop", "add_5"]
-    ]
-    assert len(adjustment_rows) == 1
-    assert adjustment_rows[0][1].text == "3"
+    assert "confirmar_" in callbacks[0] or any("confirmar_" in cb for cb in callbacks)
+    assert "modificar_carrito" in callbacks
+    assert "finalizar_" in callbacks[0] or any("finalizar_" in cb for cb in callbacks)
 
 
 @pytest.mark.asyncio
