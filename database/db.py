@@ -20,6 +20,11 @@ class DatabaseInterface(ABC):
     @abstractmethod
     def executemany(self, query, params_list):
         pass
+
+    @abstractmethod
+    def executescript(self, script: str) -> None:
+        """Ejecuta un script SQL con múltiples sentencias."""
+        pass
     
     @abstractmethod
     def close_all_connections(self):

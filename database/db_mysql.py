@@ -106,6 +106,22 @@ class MySQLDatabase(DatabaseInterface):
             cursor.close()
             self._return_connection(conn)
     
+    def executescript(self, script: str) -> None:
+        """Ejecuta un script SQL con múltiples sentencias."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            for result in cursor.execute(script, multi=True):
+                if result.with_rows:
+                    result.fetchall()
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise DatabaseError("MySQL executescript error") from e
+        finally:
+            cursor.close()
+            self._return_connection(conn)
+
     def close_all_connections(self):
         """Cerrar todas las conexiones"""
         for conn in self.connection_pool:

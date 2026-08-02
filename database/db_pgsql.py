@@ -161,5 +161,19 @@ class PostgreSQLDatabase(DatabaseInterface):
             cursor.close()
             self._return_connection(conn)
     
+    def executescript(self, script: str) -> None:
+        """Ejecuta un script SQL con múltiples sentencias."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(script)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise DatabaseError("PostgreSQL executescript error") from e
+        finally:
+            cursor.close()
+            self._return_connection(conn)
+
     def close_all_connections(self):
         self.connection_pool.closeall()

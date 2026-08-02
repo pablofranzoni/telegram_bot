@@ -98,6 +98,18 @@ class SQLiteDatabase(DatabaseInterface):
             cursor.close()
             conn.close()
 
+    def executescript(self, script: str) -> None:
+        """Ejecuta un script SQL con múltiples sentencias."""
+        conn = self._get_connection()
+        try:
+            conn.executescript(script)
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise DatabaseError("SQLite executescript error") from e
+        finally:
+            conn.close()
+
     def close_all_connections(self):
         # SQLite no necesita cerrar conexiones pool
         pass
