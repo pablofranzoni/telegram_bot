@@ -15,8 +15,9 @@ from dotenv import load_dotenv
 from telegram.ext import Application
 
 from bot_core import create_and_initialize_app
-from database import db_manager
+from database.db_manager import db_manager
 from database.db_factory import DatabaseType
+from database.schema_manager import initialize_database, SchemaMigrationError
 from routes.csv_routes import csv_bp
 from routes.products_routes import products_bp
 from routes.categories_routes import categories_bp
@@ -67,6 +68,16 @@ app_flask.config['ALLOWED_EXTENSIONS'] = {'csv'}
 app_flask.config['JWT_SECRET_KEY'] = Config.JWT_SECRET_KEY
 app_flask.config['JWT_ALGORITHM'] = Config.JWT_ALGORITHM
 app_flask.config['JWT_ACCESS_TOKEN_EXPIRES'] = Config.JWT_ACCESS_TOKEN_EXPIRES
+
+# Database configuration
+app_flask.config['DB_TYPE'] = Config.DB_TYPE.value
+app_flask.config['DATABASE_URL'] = Config.DATABASE_URL
+app_flask.config['DATABASE_PATH'] = Config.SQLITE_PATH
+app_flask.config['DB_HOST'] = Config.MYSQL_HOST
+app_flask.config['DB_USER'] = Config.MYSQL_USER
+app_flask.config['DB_PASSWORD'] = Config.MYSQL_PASSWORD
+app_flask.config['DB_NAME'] = Config.MYSQL_DATABASE
+app_flask.config['DB_PORT'] = Config.MYSQL_PORT
 
 # Initialize JWTManager
 jwt = JWTManager(app_flask)
@@ -121,9 +132,6 @@ def _after_request(response):
     )
     return response
 
-
-#db_manager.init_db(DatabaseType.SQLITE, db_path="./pedidos_bot.db")
-db_manager.init_db(DatabaseType.POSTGRESQL, DATABASE_URL=os.getenv('DATABASE_URL'))
 
 app_flask.register_blueprint(auth_bp, url_prefix='/api')
 app_flask.register_blueprint(admin_bp, url_prefix='/api')
@@ -445,6 +453,25 @@ def mercadopago_webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # ==================== CONFIGURACIÓN INICIAL ====================
+def bootstrap_database() -> None:
+    """Inicializa la conexión a la base de datos y verifica/aplica el schema.
+
+    Debe ejecutarse una sola vez por proceso, antes de cualquier request
+    o inicialización de PTB. Por defecto verifica que el schema esté aplicado
+    (modo seguro para usuarios sin privilegios DDL); si ``DB_AUTO_MIGRATE=true``
+    aplica migraciones pendientes.
+
+    Si el schema no está completo o no puede aplicarse, el proceso falla.
+    """
+    if db_manager._db is not None:
+        return
+
+    db_manager.init_app(app_flask)
+    db = db_manager.get_db()
+    initialize_database(db, Config.DB_TYPE)
+    logger.info("Base de datos inicializada y schema verificado")
+
+
 def setup_webhook():
     """Configura el webhook en Telegram (se ejecuta al inicio)"""
     if not TOKEN or not WEBHOOK_URL or not WEBHOOK_PATH_TOKEN or not WEBHOOK_SECRET_TOKEN:
@@ -487,13 +514,14 @@ def setup_webhook():
 
 
 def bootstrap_webhook_runtime() -> None:
-    """Inicializa recursos de webhook/PTB una sola vez por proceso."""
+    """Inicializa recursos de base de datos, webhook y PTB una sola vez por proceso."""
     global bootstrap_done
 
     with bootstrap_lock:
         if bootstrap_done:
             return
 
+        bootstrap_database()
         setup_webhook()
         get_or_create_telegram_app()
         bootstrap_done = True

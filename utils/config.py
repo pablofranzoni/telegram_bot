@@ -23,12 +23,13 @@ class Config:
     
     # ============================================
     # 🎯 SOLO CAMBIA ESTA LÍNEA PARA CAMBIAR DE BD
+    # También se puede sobreescribir con la variable de entorno DB_TYPE.
     # ============================================
     #DB_TYPE = DatabaseType.SQLITE  # <- Cambia aquí: SQLITE, POSTGRESQL, MYSQL
-    DB_TYPE = DatabaseType.POSTGRESQL  # <- Cambia aquí: SQLITE, POSTGRESQL, MYSQL
+    DB_TYPE = DatabaseType(os.getenv('DB_TYPE', 'postgresql').lower())
 
     # SQLite
-    SQLITE_PATH = os.getenv('SQLITE_PATH', './data.db')
+    SQLITE_PATH = os.getenv('DATABASE_PATH') or os.getenv('SQLITE_PATH', './data.db')
     
     # PostgreSQL
     DATABASE_URL = os.getenv('DATABASE_URL')
