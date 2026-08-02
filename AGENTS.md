@@ -5,8 +5,8 @@
 - **Entry point:** `bot_pa.py` — WSGI app (`application = app_flask`) for PythonAnywhere/Gunicorn AND runnable locally (`python bot_pa.py`, Flask dev server on `0.0.0.0:5000` with reloader). It builds the Flask app, registers 7 blueprints under `/api`, and runs the Telegram `Application` in a **dedicated background event loop** (singleton) so webhook requests can dispatch updates without creating a new loop per request. The bootstrap is guarded by a `bootstrap_lock` / `bootstrap_done` flag; the Werkzeug reloader skip is keyed off `WERKZEUG_RUN_MAIN`.
 - **Bot logic:** `bot_core.py` defines `create_and_initialize_app(token, mode, initialize_app)` which wires `CommandHandler` and two `ConversationHandler`s (products, email) from handlers re-exported by `shared/handlers/commands.py` (a façade over `auth.py`, `cart.py`, `products.py`, `payments.py`).
 - **Conversation states** live in `utils/constants.py:EstadoConversacion`.
-- **Database:** `database/db_manager.py:db_manager` is a **process-wide singleton** (`DatabaseManager` with `__new__`). `database/db_factory.py:DatabaseFactory` is a **per-config cache** keyed by `f"{type}_{hash(frozenset(kwargs))}"` — calling `init_db` twice with different kwargs creates a second instance; with the same kwargs you get the cached one. Three backends: SQLite (`db_pgsql.py`-style adapter, `db_path=`), PostgreSQL (`db_url=` or `DATABASE_URL`), MySQL.
-- **Schema source of truth:** `pedidos_bot.sql` (SQLite-flavored DDL). The tests load this file into an in-memory connection — keep it in sync with the PostgreSQL `pedidos_bot_postgresql.sql` and the `migrations/` SQL when you change the schema.
+- **Database:** `database/db_manager.py:db_manager` is a **process-wide singleton** (`DatabaseManager` with `__new__`). `database/db_factory.py:DatabaseFactory` is a **per-config cache** keyed by `f"{type}_{hash(frozenset(kwargs))}"` — calling `init_db` twice with different kwargs creates a second instance; with the same kwargs you get the cached one. Three backends: SQLite (`db_pgsql.py`-style adapter, `db_path=`), PostgreSQL (`db_url=` or `DATABASE_URL`), MySQL. The runtime schema is applied automatically by `database/schema_manager.py:initialize_database()` at startup; do not add seed data to the schema files.
+- **Schema source of truth:** `database/schema/<db_type>/` contains the incremental schema files (e.g. `001_base_schema.sql`). At startup `database/schema_manager.py:initialize_database()` applies any pending migration and records it in the `schema_migrations` table. The runtime schema is idempotent (`CREATE ... IF NOT EXISTS`) and contains no seed data. Legacy files `pedidos_bot.sql` and `pedidos_bot_postgresql.sql` are kept as reference but are no longer loaded automatically.
 - **Two extra databases in the repo** (not SQLite, not used at runtime): `flask-sqlalchemy-postgres-moderno/` and `telegram-webhook-flask-ptb/` are vendored reference projects — do not edit them as if they were part of the app.
 
 ## Key conventions / gotchas
@@ -54,13 +54,46 @@ pytest tests/test_admin_api.py -k login      # single test pattern
 pytest --cov=. --cov-report=term-missing
 
 # Schema / migrations
-python migrations/migrate.py --database sqlite --db-path ./pedidos_bot.db
-python migrations/migrate.py --database postgresql --connection-string "$env:DATABASE_URL"
-python migrations/verify_migration.py --database sqlite --db-path ./pedidos_bot.db
+python database/apply_schema.py --database sqlite --db-path ./pedidos_bot.db
+python database/apply_schema.py --database postgresql --connection-string "$env:DATABASE_URL"
+python database/apply_schema.py --database postgresql --db-host localhost --db-name db --db-user admin --db-password pass
+
+# Mark existing schema as applied (legacy databases)
+python database/apply_schema.py --database postgresql --connection-string "$env:DATABASE_URL" --mark-applied
+
+# The app verifies (not applies) the schema at startup. Set DB_AUTO_MIGRATE=true
+# only for local convenience; prefer apply_schema.py for any environment.
+# Add new incremental migrations under database/schema/<db_type>/NNN_description.sql.
 
 # First admin
 python create_first_admin.py
 ```
+
+## Schema management
+
+The runtime schema lives under `database/schema/<db_type>/` as numbered SQL
+files. There are two roles involved:
+
+- **Administrator (DDL user):** runs `database/apply_schema.py` to create/alter
+tables, indexes and extensions. This is the only process that executes DDL.
+- **Application (runtime user):** verifies at startup, via
+`database/schema_manager.py`, that every known migration is recorded in
+`schema_migrations`. If a migration is missing, the app fails with a clear
+message pointing to `apply_schema.py`.
+
+`DB_AUTO_MIGRATE=true` can make the app apply migrations itself, but this is
+only intended for local convenience. Production and shared environments should
+always use `apply_schema.py` with an administrator user.
+
+PostgreSQL notes:
+- The extension `pg_uuidv7` must be installed by the administrator before the
+app starts (the schema executes `CREATE EXTENSION IF NOT EXISTS pg_uuidv7`).
+- If tables were created by a different user, the runtime user will not be able
+to create indexes on them; use `apply_schema.py` with the table owner.
+
+Legacy databases that already contain the correct schema can be synchronized
+with the migration tracker by running `apply_schema.py --mark-applied`. This
+only inserts records into `schema_migrations` without executing any SQL.
 
 There is **no** Black/Flake8/mypy/isort configuration in the repo (`requirements.txt` doesn't list them and there is no `pyproject.toml`/`setup.cfg`/`.flake8`). Don't add a `lint` step or assume `black .` is wired anywhere.
 
@@ -72,7 +105,11 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 - `WEBHOOK_URL` — must be `https://`; if missing, `setup_webhook()` only logs a warning and the bot still starts
 - `TELEGRAM_WEBHOOK_PATH_TOKEN`, `TELEGRAM_WEBHOOK_SECRET_TOKEN` — **both required** for `/webhook/<token>` to accept updates (503 otherwise)
 - `SECRET_KEY` — Flask session/uploads
-- `DATABASE_URL` — required for the default PostgreSQL backend
+- `DB_TYPE` — `sqlite`, `postgresql` or `mysql` (default `postgresql`); controls which backend and schema are loaded at startup
+- `DATABASE_URL` — required for PostgreSQL backend
+- `DATABASE_PATH` or `SQLITE_PATH` — SQLite database file path (default `./data.db`)
+- `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT` — used for MySQL backend
+- `DB_AUTO_MIGRATE` — `true/1/yes/on` to apply migrations at startup (default `false`); production and local development should use `database/apply_schema.py` instead
 - `JWT_SECRET_KEY` (fallback `your-secret-key-change-in-production` — change in prod), `JWT_ACCESS_TOKEN_EXPIRES` (default 3600), `JWT_REFRESH_TOKEN_EXPIRES` (default 2592000)
 - `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (default 465), `EMAIL_FROM_NAME`, `BUSINESS_NAME`, `BUSINESS_EMAIL`, `SEND_PDF_MODE` (default `EMAIL`)
 - `MP_ACCESS_TOKEN` — MercadoPago SDK init
@@ -101,7 +138,7 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 
 - Importing `from shared.handlers.commands import ...` for handlers is fine — that module is a façade. The real handler implementations live in `shared/handlers/{auth,cart,products,payments}.py`. `shared/handlers/commands_new.py` exists but is **not** the one wired up.
 - The schema has a `customers` table (API users live there) that is distinct from the bot's "cliente" concept handled by the `customers` service.
-- `utils/init_database.py` is a **standalone** SQLite bootstrap script with its own minimal schema (`productos`, `clientes`, `pedidos`) — it is **not** what the app uses at runtime. The runtime schema is `pedidos_bot.sql`.
+- `utils/init_database.py` is a **standalone** SQLite bootstrap script with its own minimal schema (`productos`, `clientes`, `pedidos`) — it is **not** what the app uses at runtime. The runtime schema is loaded from `database/schema/<db_type>/` by `database/schema_manager.py`.
 - Do not run `python ejemplo_corto1.py` or `python getupdates.py` against a real webhook unless you intend to reset the live `setWebhook` (the script does `deleteWebhook?drop_pending_updates=true`).
 - The `database/db_manager.py:db_manager` singleton stores the chosen DB on `_db`. Tests reset it via `db_manager._db = None` between cases — if you add code that reads the manager without `get_db()`, you may bypass test cleanup.
 
