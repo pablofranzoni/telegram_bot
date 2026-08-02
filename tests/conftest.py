@@ -95,8 +95,10 @@ def app() -> Flask:
     # Reset DB singleton for a clean slate
     db_manager._db = None
 
-    # Load schema into a long-lived in-memory connection
-    schema_path = os.path.join(os.path.dirname(__file__), '..', 'pedidos_bot.sql')
+    # Load clean schema into a long-lived in-memory connection
+    schema_path = os.path.join(
+        os.path.dirname(__file__), '..', 'database', 'schema', 'sqlite', '001_base_schema.sql'
+    )
     with open(schema_path, 'r', encoding='utf-8') as f:
         schema_sql = f.read()
     conn = sqlite3.connect(':memory:')
@@ -176,6 +178,14 @@ def _build_persistent_db(conn: sqlite3.Connection):
                 cur.executemany(query, params_list)
                 self._conn.commit()
                 return cur.rowcount
+            finally:
+                cur.close()
+
+        def executescript(self, script: str) -> None:
+            cur = self._conn.cursor()
+            try:
+                cur.executescript(script)
+                self._conn.commit()
             finally:
                 cur.close()
 
