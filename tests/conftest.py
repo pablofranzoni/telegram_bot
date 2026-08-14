@@ -96,14 +96,13 @@ def app() -> Flask:
     db_manager._db = None
 
     # Load clean schema into a long-lived in-memory connection
-    schema_path = os.path.join(
-        os.path.dirname(__file__), '..', 'database', 'schema', 'sqlite', '001_base_schema.sql'
-    )
-    with open(schema_path, 'r', encoding='utf-8') as f:
-        schema_sql = f.read()
+    schema_dir = os.path.join(os.path.dirname(__file__), '..', 'database', 'schema', 'sqlite')
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
-    conn.executescript(schema_sql)
+    for filename in sorted(os.listdir(schema_dir)):
+        if filename.endswith('.sql'):
+            with open(os.path.join(schema_dir, filename), 'r', encoding='utf-8') as f:
+                conn.executescript(f.read())
     conn.commit()
     db_manager._db = _build_persistent_db(conn)
 

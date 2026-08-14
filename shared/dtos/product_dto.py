@@ -24,3 +24,5 @@ class ProductDTO:
     description: str
     price: Decimal
     stock_available: int | None = None
+    last_purchase_date: str | None = None
+    warehouse_location: str | None = None

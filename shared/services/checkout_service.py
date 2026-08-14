@@ -11,6 +11,7 @@ from utils.database import (
     guardar_pago,
     obtener_cliente,
     obtener_detalle_pedido,
+    reservar_stock,
 )
 
 
@@ -33,6 +34,17 @@ def finalize_checkout(*, telegram_id: int, invoice_id: str) -> CheckoutResultDTO
             invoice_id=invoice_id,
             error_message="El pedido no existe o no tiene productos.",
         )
+
+    # Reservar stock para cada item del pedido antes de generar el pago
+    for item in items:
+        product_id = int(get_record_value(item, "id", fallback_index=0))
+        quantity = int(get_record_value(item, "cantidad", fallback_index=2))
+        if not reservar_stock(product_id, quantity):
+            return CheckoutResultDTO(
+                success=False,
+                invoice_id=invoice_id,
+                error_message=f"Stock insuficiente para el producto {product_id}.",
+            )
 
     amount = to_decimal(get_record_value(invoice_info, "total", Decimal("0.00")))
     title = f"Pedido #{invoice_id}"

@@ -76,6 +76,7 @@ def test_apply_mode_applies_base_schema():
         "customers",
         "invoice_items",
         "invoices",
+        "inventory_movements",
         "payments",
         "product_inventory",
         "products",
@@ -84,6 +85,24 @@ def test_apply_mode_applies_base_schema():
         "upload_logs",
     }
     assert expected.issubset(table_names)
+
+    # Verificar columnas nuevas de product_inventory (table_xinfo incluye generated columns)
+    columns = db.execute(
+        "PRAGMA table_xinfo(product_inventory)",
+        fetchall=True,
+    )
+    column_names = {row["name"] for row in columns}
+    assert "stock_disponible" in column_names
+    assert "ultima_compra" in column_names
+    assert "ubicacion_almacen" in column_names
+
+    # Verificar trigger de inventory_movements en SQLite
+    triggers = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND name = ?",
+        ("trg_update_inventory",),
+        fetchone=True,
+    )
+    assert triggers is not None
 
     migration = db.execute(
         "SELECT name FROM schema_migrations WHERE name = ?",
@@ -107,7 +126,7 @@ def test_apply_mode_is_idempotent():
         "SELECT COUNT(*) AS total FROM schema_migrations",
         fetchone=True,
     )
-    assert count["total"] == 1
+    assert count["total"] == 3
 
 
 def test_verify_mode_passes_when_fully_migrated():

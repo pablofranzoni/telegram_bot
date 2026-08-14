@@ -43,6 +43,7 @@ def test_finalize_checkout_propagates_payment_error(monkeypatch, sample_invoice_
         finalized["called"] = True
 
     monkeypatch.setattr(checkout_service, "finalizar_pedido_db", fake_finalize)
+    monkeypatch.setattr(checkout_service, "reservar_stock", lambda product_id, quantity: True)
     monkeypatch.setattr(
         checkout_service,
         "create_payment_link",
@@ -80,6 +81,7 @@ def test_finalize_checkout_success(monkeypatch, sample_invoice_info, sample_invo
         finalized["invoice_id"] = invoice_id
 
     monkeypatch.setattr(checkout_service, "finalizar_pedido_db", fake_finalize)
+    monkeypatch.setattr(checkout_service, "reservar_stock", lambda product_id, quantity: True)
     monkeypatch.setattr(
         checkout_service,
         "create_payment_link",

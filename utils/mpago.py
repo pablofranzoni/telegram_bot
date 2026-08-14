@@ -6,7 +6,11 @@ import mercadopago
 
 from typing import Any
 from datetime import datetime
-from utils.database import actualizar_pago
+from utils.database import (
+    actualizar_pago,
+    confirmar_venta_inventory,
+    liberar_stock_reservado_invoice,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -285,13 +289,22 @@ class MercadoPagoSimple:
         
         # 1. Actualizar BD
         actualizar_pago(payment_id, invoice_id, 'aprobado', monto, fecha)
-        
-        # 2. Aquí iría la notificación al usuario por Telegram
+
+        # 2. Confirmar venta en inventario (descuenta stock_actual y libera reservas)
+        if invoice_id:
+            venta_ok = confirmar_venta_inventory(invoice_id)
+            if not venta_ok:
+                logger.error(
+                    "No se pudo confirmar la venta en inventario",
+                    extra={"invoice_id": invoice_id, "payment_id": payment_id},
+                )
+
+        # 3. Aquí iría la notificación al usuario por Telegram
         if invoice_id:
             # notificar_usuario_telegram(telegram_id, monto, payment_id)
             logger.debug("Pendiente de notificar pago aprobado", extra={"invoice_id": invoice_id, "telegram_id": telegram_id})
-        
-        # 3. Aquí iría la lógica de negocio (ej: activar producto, enviar código, etc.)
+
+        # 4. Aquí iría la lógica de negocio (ej: activar producto, enviar código, etc.)
         # activar_servicio_para_usuario(telegram_id, monto)
         receipt_delivery = self.enviar_comprobante_si_corresponde(invoice_id, payment_id)
         
@@ -469,11 +482,15 @@ class MercadoPagoSimple:
         
         # 1. Actualizar BD
         actualizar_pago(payment_id, invoice_id, 'rechazado', monto)
-        
-        # 2. Notificar al usuario (opcional)
+
+        # 2. Liberar reservas de stock porque el pago no se concretó
+        if invoice_id:
+            liberar_stock_reservado_invoice(invoice_id)
+
+        # 3. Notificar al usuario (opcional)
         if invoice_id:
             logger.debug("Pendiente de notificar pago rechazado", extra={"invoice_id": invoice_id, "telegram_id": telegram_id})
-        
+
         return {
             "success": False,
             "action": "rechazado",

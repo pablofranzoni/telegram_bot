@@ -1,7 +1,9 @@
 import logging
 from typing import Any
+
 from database.db import DatabaseError
 from database.db_manager import get_db
+from shared.record_utils import get_record_value
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +104,18 @@ def obtener_productos_por_categoria_paginados(categoria, limite, offset=0):
 
 
 def obtener_producto_por_id(product_id):
-    """Obtiene información de un producto específico"""
+    """Obtiene información de un producto específico, incluyendo inventario."""
     try:
         db = get_db()
         producto = db.execute('''
-                SELECT id, nombre, descripcion, precio 
-                FROM products
-                WHERE id = ?
+                SELECT p.id, p.nombre, p.descripcion, p.precio, p.disponible,
+                       p.category_id,
+                       COALESCE(pi.stock_disponible, 0) AS stock_available,
+                       pi.ultima_compra AS last_purchase_date,
+                       pi.ubicacion_almacen AS warehouse_location
+                FROM products p
+                LEFT JOIN product_inventory pi ON pi.product_id = p.id
+                WHERE p.id = ?
             ''', (product_id,), fetchone=True, param_types=['integer'])
         return producto
     
@@ -455,14 +462,14 @@ def actualizar_cantidad_producto(invoice_id, producto_id, nueva_cantidad):
 
 def verificar_stock_disponible(producto_id):
     """
-    Verifica el stock disponible de un producto.
+    Verifica el stock disponible de un producto usando la columna generada.
     Retorna None si no hay control de stock.
     """
     try:
         db = get_db()
         resultado = db.execute(
             '''
-                SELECT stock_actual, stock_reservado
+                SELECT stock_disponible
                 FROM product_inventory
                 WHERE product_id = ?
             ''',
@@ -473,9 +480,7 @@ def verificar_stock_disponible(producto_id):
         if not resultado:
             return None
 
-        stock_actual = resultado['stock_actual'] or 0
-        stock_reservado = resultado['stock_reservado'] or 0
-        return max(int(stock_actual) - int(stock_reservado), 0)
+        return max(int(resultado['stock_disponible'] or 0), 0)
 
     except DatabaseError as e:
         logger.error("Error al verificar stock disponible para producto %s: %s", producto_id, e)
@@ -712,7 +717,9 @@ def get_all_products_paginated(limit: int, offset: int) -> list:
             '''
             SELECT p.id, p.nombre, p.descripcion, p.precio, p.disponible,
                    p.category_id, c.nombre AS category_name,
-                   COALESCE(pi.stock_actual - pi.stock_reservado, 0) AS stock_available
+                   COALESCE(pi.stock_disponible, 0) AS stock_available,
+                   pi.ultima_compra AS last_purchase_date,
+                   pi.ubicacion_almacen AS warehouse_location
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN product_inventory pi ON pi.product_id = p.id
@@ -781,6 +788,298 @@ def create_inventory_row_db(product_id: int, stock_inicial: int = 0) -> bool:
         logger.error("Error al crear fila de inventario para producto %s: %s", product_id, e)
         return False
 
+
+# ====================== FUNCIONES DE INVENTARIO (RESERVAS Y MOVIMIENTOS) ======================
+def _get_inventory_row(product_id: int) -> dict | None:
+    """Devuelve la fila de inventario para un producto o None si no existe."""
+    try:
+        db = get_db()
+        return db.execute(
+            'SELECT stock_actual, stock_reservado, stock_disponible FROM product_inventory WHERE product_id = ?',
+            (product_id,),
+            fetchone=True,
+            param_types=['integer'],
+        )
+    except DatabaseError as e:
+        logger.error("Error al obtener inventario para producto %s: %s", product_id, e)
+        return None
+
+
+def reservar_stock(product_id: int, cantidad: int) -> bool:
+    """
+    Incrementa stock_reservado si hay stock_disponible suficiente.
+    Retorna True si la reserva fue exitosa.
+    """
+    if cantidad <= 0:
+        return True
+    try:
+        db = get_db()
+        row = _get_inventory_row(product_id)
+        if not row:
+            logger.warning(
+                "No hay fila de inventario para producto %s; no se puede reservar",
+                product_id,
+            )
+            return False
+
+        disponible = int(row['stock_disponible'] or 0)
+        if disponible < cantidad:
+            logger.info(
+                "Stock insuficiente para reservar producto %s",
+                product_id,
+                extra={"disponible": disponible, "solicitado": cantidad},
+            )
+            return False
+
+        db.execute(
+            'UPDATE product_inventory SET stock_reservado = stock_reservado + ? WHERE product_id = ? AND stock_disponible >= ?',
+            (cantidad, product_id, cantidad),
+            param_types=['integer', 'integer', 'integer'],
+        )
+
+        logger.info(
+            "Stock reservado",
+            extra={"product_id": product_id, "cantidad": cantidad},
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al reservar stock para producto %s: %s", product_id, e)
+        return False
+
+
+def liberar_stock(product_id: int, cantidad: int) -> bool:
+    """
+    Decrementa stock_reservado sin permitir valores negativos.
+    Retorna True si la liberacion fue exitosa.
+    """
+    if cantidad <= 0:
+        return True
+    try:
+        db = get_db()
+        db.execute(
+            '''
+            UPDATE product_inventory
+            SET stock_reservado = MAX(stock_reservado - ?, 0)
+            WHERE product_id = ?
+            ''',
+            (cantidad, product_id),
+            param_types=['integer', 'integer'],
+        )
+        logger.info(
+            "Stock liberado",
+            extra={"product_id": product_id, "cantidad": cantidad},
+        )
+        return True
+    except DatabaseError as e:
+        logger.error("Error al liberar stock para producto %s: %s", product_id, e)
+        return False
+
+
+def insert_inventory_movement(
+    product_id: int,
+    tipo_movimiento: str,
+    cantidad: int,
+    costo_unitario: float | None = None,
+    precio_venta_unitario: float | None = None,
+    referencia: str | None = None,
+    usuario_id: int | None = None,
+) -> int | None:
+    """
+    Inserta un movimiento de inventario y deja que el trigger actualice product_inventory.
+    Devuelve el id del movimiento o None en caso de error.
+    """
+    try:
+        db = get_db()
+        row = _get_inventory_row(product_id)
+        if not row:
+            logger.warning(
+                "No hay fila de inventario para producto %s; no se registra movimiento",
+                product_id,
+            )
+            return None
+
+        stock_previo = int(row['stock_actual'] or 0)
+        stock_posterior = stock_previo + cantidad
+
+        movement_id = db.execute(
+            '''
+            INSERT INTO inventory_movements (
+                product_id, tipo_movimiento, cantidad, stock_previo, stock_posterior,
+                costo_unitario, precio_venta_unitario, referencia, usuario_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                product_id, tipo_movimiento, cantidad, stock_previo, stock_posterior,
+                costo_unitario, precio_venta_unitario, referencia, usuario_id,
+            ),
+            param_types=[
+                'integer', 'string', 'integer', 'integer', 'integer',
+                'float', 'float', 'string', 'integer',
+            ],
+        )
+        logger.info(
+            "Movimiento de inventario registrado",
+            extra={
+                "product_id": product_id,
+                "tipo": tipo_movimiento,
+                "cantidad": cantidad,
+                "referencia": referencia,
+            },
+        )
+        return movement_id
+    except DatabaseError as e:
+        logger.error(
+            "Error al registrar movimiento de inventario para producto %s: %s",
+            product_id,
+            e,
+        )
+        return None
+
+
+def registrar_compra_inventory(
+    product_id: int,
+    cantidad: int,
+    costo_unitario: float | None = None,
+    referencia: str | None = None,
+    usuario_id: int | None = None,
+) -> bool:
+    """
+    Registra una compra de mercancia (incrementa stock_actual via trigger).
+    """
+    if cantidad <= 0:
+        return False
+    movement_id = insert_inventory_movement(
+        product_id=product_id,
+        tipo_movimiento='compra',
+        cantidad=cantidad,
+        costo_unitario=costo_unitario,
+        referencia=referencia,
+        usuario_id=usuario_id,
+    )
+    return movement_id is not None
+
+
+def _invoice_movements_exist(invoice_id, tipo_movimiento: str) -> bool:
+    """Verifica si ya existen movimientos de un tipo para una invoice dada."""
+    try:
+        db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
+        result = db.execute(
+            '''
+            SELECT COUNT(*) AS total
+            FROM inventory_movements
+            WHERE referencia = ? AND tipo_movimiento = ?
+            ''',
+            (f"invoice_{invoice_id}", tipo_movimiento),
+            fetchone=True,
+            param_types=[invoice_id_type, 'string'],
+        )
+        return bool(result and int(result['total'] or 0) > 0)
+    except DatabaseError as e:
+        logger.error(
+            "Error verificando movimientos previos para invoice %s: %s",
+            invoice_id,
+            e,
+        )
+        return False
+
+
+def confirmar_venta_inventory(invoice_id) -> bool:
+    """
+    Registra movimientos de venta para los items de una invoice y libera las reservas.
+    Es idempotente: no hace nada si ya existen movimientos de venta para la invoice.
+    """
+    try:
+        db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
+
+        if _invoice_movements_exist(invoice_id, 'venta'):
+            logger.info(
+                "Venta ya confirmada previamente para invoice %s",
+                invoice_id,
+            )
+            return True
+
+        items = db.execute(
+            '''
+            SELECT product_id, cantidad, precio_unitario
+            FROM invoice_items
+            WHERE invoice_id = ?
+            ''',
+            (invoice_id,),
+            fetchall=True,
+            param_types=[invoice_id_type],
+        )
+        if not items:
+            logger.warning("No hay items para confirmar venta en invoice %s", invoice_id)
+            return False
+
+        referencia = f"invoice_{invoice_id}"
+        for item in items:
+            product_id = int(get_record_value(item, "product_id", fallback_index=0))
+            cantidad = int(get_record_value(item, "cantidad", fallback_index=1))
+            precio_venta = float(get_record_value(item, "precio_unitario", fallback_index=2) or 0)
+
+            # 1. Registrar venta (descuenta stock_actual via trigger)
+            if insert_inventory_movement(
+                product_id=product_id,
+                tipo_movimiento='venta',
+                cantidad=-cantidad,
+                precio_venta_unitario=precio_venta,
+                referencia=referencia,
+            ) is None:
+                logger.error(
+                    "Fallo al registrar venta para invoice %s, producto %s",
+                    invoice_id,
+                    product_id,
+                )
+                return False
+
+            # 2. Liberar reserva
+            liberar_stock(product_id, cantidad)
+
+        logger.info("Venta confirmada y reservas liberadas", extra={"invoice_id": invoice_id})
+        return True
+    except DatabaseError as e:
+        logger.error("Error confirmando venta para invoice %s: %s", invoice_id, e)
+        return False
+
+
+def liberar_stock_reservado_invoice(invoice_id) -> bool:
+    """
+    Libera el stock reservado para todos los items de una invoice.
+    Util cuando el pago es rechazado o el pedido se cancela.
+    """
+    try:
+        db = get_db()
+        invoice_id_type = _invoice_param_type(invoice_id)
+        items = db.execute(
+            '''
+            SELECT product_id, cantidad
+            FROM invoice_items
+            WHERE invoice_id = ?
+            ''',
+            (invoice_id,),
+            fetchall=True,
+            param_types=[invoice_id_type],
+        )
+        if not items:
+            return True
+
+        for item in items:
+            product_id = int(get_record_value(item, "product_id", fallback_index=0))
+            cantidad = int(get_record_value(item, "cantidad", fallback_index=1))
+            liberar_stock(product_id, cantidad)
+
+        logger.info("Reservas liberadas por invoice cancelada/rechazada", extra={"invoice_id": invoice_id})
+        return True
+    except DatabaseError as e:
+        logger.error("Error liberando stock reservado para invoice %s: %s", invoice_id, e)
+        return False
+
+
+# ====================== FIN FUNCIONES DE INVENTARIO ======================
 
 def update_product_db(product_id: int, fields: dict) -> bool:
     """Dynamically updates only the provided fields for a product."""

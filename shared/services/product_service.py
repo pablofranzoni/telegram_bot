@@ -28,6 +28,8 @@ def _row_to_dto(row: dict) -> ProductDTO:
         description=str(get_record_value(row, "descripcion", fallback_index=2) or ""),
         price=to_decimal(get_record_value(row, "precio", fallback_index=3)),
         stock_available=int(get_record_value(row, "stock_available", fallback_index=7) or 0),
+        last_purchase_date=get_record_value(row, "last_purchase_date", fallback_index=8),
+        warehouse_location=get_record_value(row, "warehouse_location", fallback_index=9),
     )
 
 
@@ -60,6 +62,9 @@ def get_product(product_id: int) -> ProductDTO | None:
         name=str(get_record_value(row, "nombre", fallback_index=1) or ""),
         description=str(get_record_value(row, "descripcion", fallback_index=2) or ""),
         price=to_decimal(get_record_value(row, "precio", fallback_index=3)),
+        stock_available=int(get_record_value(row, "stock_available", fallback_index=7) or 0),
+        last_purchase_date=get_record_value(row, "last_purchase_date", fallback_index=8),
+        warehouse_location=get_record_value(row, "warehouse_location", fallback_index=9),
     )
 
 

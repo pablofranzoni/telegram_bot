@@ -19,6 +19,8 @@ def _product_to_dict(dto) -> dict:
         "descripcion": dto.description,
         "precio": float(dto.price),
         "stock_available": dto.stock_available,
+        "ultima_compra": dto.last_purchase_date,
+        "ubicacion_almacen": dto.warehouse_location,
     }
 
 
