@@ -133,6 +133,8 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 - `POST /mercadopago-webhook/` — MP notifications (note trailing slash)
 - `GET|POST /<estado>` — payment return URLs (`okpago`, `failpago`, `pendpago`)
 - `/api/...` — blueprints: `auth`, `admin`, `csv`, `products`, `categories`, `customers`, `invoices` (all require JWT except `auth/login`, `auth/refresh`, and registration/password-reset flows)
+  - `GET /api/products/<id>/stock` — current inventory (JWT)
+  - `POST /api/products/<id>/stock` — add stock, admin only (JWT + admin)
 
 ## Things agents commonly get wrong here
 

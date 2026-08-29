@@ -60,8 +60,10 @@ class SQLiteDatabase(DatabaseInterface):
             cursor.close()
             conn.close()
     
-    def execute(self, query, params=(), fetchone=False, fetchall=False) -> Any | list[Any] | int | None:
+    def execute(self, query, params=(), fetchone=False, fetchall=False, param_types=None) -> Any | list[Any] | int | None:
         """Ejecutar consulta simple"""
+        # param_types se mantiene en la firma por compatibilidad con DatabaseInterface
+        # y los adaptadores PostgreSQL/MySQL, pero SQLite no lo necesita.
         conn = self._get_connection()
         cursor = conn.cursor()
         

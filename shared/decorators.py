@@ -135,6 +135,14 @@ def admin_required(f: Callable) -> Callable:
                     "error_code": "USER_NOT_FOUND"
                 }), 404
             
+            if not isinstance(user, dict):
+                logger.error(f"Unexpected user data type for identity: {identity}")
+                return jsonify({
+                    "status": "error",
+                    "message": "Authorization check failed",
+                    "error_code": "AUTH_CHECK_FAILED"
+                }), 500
+            
             # Check if user is admin
             if user.get("is_admin") != 1:
                 logger.warning(f"Non-admin user attempted privileged operation: {identity}")
@@ -164,15 +172,15 @@ def admin_required(f: Callable) -> Callable:
             
             logger.debug(f"Admin operation authorized for: {identity}")
             
-            return f(*args, **kwargs)
-            
         except Exception as e:
-            logger.error(f"Error during admin validation: {str(e)}")
+            logger.error(f"Error during admin validation: {str(e)}", exc_info=True)
             return jsonify({
                 "status": "error",
                 "message": "Authorization check failed",
                 "error_code": "AUTH_CHECK_FAILED"
             }), 500
+        
+        return f(*args, **kwargs)
     
     return decorated_function
 

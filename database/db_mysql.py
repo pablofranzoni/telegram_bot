@@ -68,7 +68,9 @@ class MySQLDatabase(DatabaseInterface):
             cursor.close()
             self._return_connection(conn)
     
-    def execute(self, query, params=(), fetchone=False, fetchall=False):
+    def execute(self, query, params=(), fetchone=False, fetchall=False, param_types=None):
+        # param_types se mantiene en la firma por compatibilidad con DatabaseInterface
+        # y el adaptador PostgreSQL, pero MySQL no lo necesita.
         conn = self._get_connection()
         cursor = conn.cursor()
         

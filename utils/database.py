@@ -779,6 +779,7 @@ def create_inventory_row_db(product_id: int, stock_inicial: int = 0) -> bool:
             '''
             INSERT INTO product_inventory (product_id, stock_actual, stock_reservado, stock_minimo)
             VALUES (?, ?, 0, 0)
+            RETURNING product_id
             ''',
             (product_id, stock_inicial),
             param_types=['integer', 'integer'],

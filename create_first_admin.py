@@ -409,7 +409,7 @@ def main():
                     """,
                     (True, email)
                 )
-                #db.commit()
+                db.commit()
                 print_success("Email verified successfully!")
                 break
             else:
