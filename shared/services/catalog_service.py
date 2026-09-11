@@ -4,6 +4,7 @@ from shared.dtos import CategoryDTO, ProductDTO
 from shared.number_utils import to_decimal
 from shared.record_utils import get_record_value
 from utils.database import (
+    buscar_productos_db,
     obtener_categorias_db,
     obtener_producto_por_id,
     obtener_productos_por_categoria,
@@ -49,6 +50,40 @@ def list_products_by_category_page(
     offset = (normalized_page - 1) * normalized_page_size
     products = obtener_productos_por_categoria_paginados(
         category_name,
+        normalized_page_size + 1,
+        offset,
+    )
+    has_next_page = len(products) > normalized_page_size
+    visible_products = products[:normalized_page_size]
+    return (
+        [
+            ProductDTO(
+                id=product_id,
+                name=name,
+                description=description,
+                price=to_decimal(price),
+            )
+            for product_id, name, description, price in visible_products
+        ],
+        has_next_page,
+    )
+
+
+def search_products(
+    query: str | None,
+    page: int = 1,
+    page_size: int = 10,
+) -> tuple[list[ProductDTO], bool]:
+    """Return one page of products matching query and whether another page exists."""
+    if not query or not query.strip():
+        return [], False
+
+    normalized_query = query.strip()
+    normalized_page = max(page, 1)
+    normalized_page_size = max(page_size, 1)
+    offset = (normalized_page - 1) * normalized_page_size
+    products = buscar_productos_db(
+        normalized_query,
         normalized_page_size + 1,
         offset,
     )

@@ -1,6 +1,7 @@
 """Handlers relacionados con la navegación por categorías y selección de productos."""
 
 from collections.abc import MutableMapping
+from html import escape as html_escape
 from typing import cast
 
 from telegram import Message, Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -9,11 +10,19 @@ from telegram.ext import ContextTypes, ConversationHandler
 from shared.dtos import CategoryDTO, ProductDTO
 from utils.constants import EstadoConversacion
 from utils.logger_factory import get_bot_logger, log_bot_event
-from shared.services.catalog_service import get_product_by_id, list_categories, list_products_by_category_page
+from shared.services.catalog_service import get_product_by_id, list_categories, list_products_by_category_page, search_products
 
 logger = get_bot_logger(__name__)
 
 PRODUCTS_PAGE_SIZE = 10
+MIN_SEARCH_LENGTH = 3
+
+
+def _escape_html(text: str | None) -> str:
+    """Escape HTML special characters for Telegram parse_mode='HTML'."""
+    if not text:
+        return ""
+    return html_escape(str(text))
 
 
 def _get_user_data(context: ContextTypes.DEFAULT_TYPE) -> MutableMapping[str, object]:
@@ -39,6 +48,8 @@ def _clear_product_navigation_state(user_data: MutableMapping[str, object]) -> N
         'producto_actual',
         'pagina_productos',
         'hay_mas_productos',
+        'termino_busqueda',
+        'modo_busqueda',
     ):
         user_data.pop(key, None)
 
@@ -339,6 +350,196 @@ async def seleccionar_producto(update: Update, context: ContextTypes.DEFAULT_TYP
             f"O escribe 0 para volver a categorías"
         )
         return EstadoConversacion.ESPERANDO_PRODUCTO.value
+
+
+async def mostrar_resultados_busqueda_texto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Muestra los resultados de búsqueda usando letras. Retorna True si hay resultados."""
+    user_data = _get_user_data(context)
+    message = _get_accessible_message(update)
+    if not message:
+        return False
+
+    termino = user_data.get('termino_busqueda')
+    if not isinstance(termino, str):
+        return False
+
+    pagina_actual_raw = user_data.get('pagina_productos', 1)
+    pagina_actual = pagina_actual_raw if isinstance(pagina_actual_raw, int) and pagina_actual_raw > 0 else 1
+    productos, hay_mas_productos = search_products(
+        termino,
+        page=pagina_actual,
+        page_size=PRODUCTS_PAGE_SIZE,
+    )
+
+    termino_seguro = _escape_html(termino)
+
+    if not productos:
+        _clear_product_navigation_state(user_data)
+        await message.reply_text(
+            f"No encontré productos para <b>{termino_seguro}</b>.\n"
+            "Probá con otra palabra o escribí /ver_productos para ver las categorías.",
+            parse_mode='HTML',
+        )
+        return False
+
+    opciones = [chr(65 + i) for i in range(len(productos))]
+
+    user_data['productos_actuales'] = productos
+    user_data['opciones_productos'] = opciones
+    user_data['pagina_productos'] = pagina_actual
+    user_data['hay_mas_productos'] = hay_mas_productos
+    user_data['modo_busqueda'] = True
+
+    mensaje = f"<b>Resultados de búsqueda: {termino_seguro}</b> 🔎\n"
+    mensaje += f"<i>Página {pagina_actual}</i>\n\n"
+
+    for letra, producto in zip(opciones, productos):
+        nombre_seguro = _escape_html(producto.name)
+        descripcion_segura = _escape_html(producto.description)
+        mensaje += f"<b>{letra}) {nombre_seguro}</b>\n"
+        mensaje += f"   <i>{descripcion_segura}</i>\n"
+        mensaje += f"   💰 ${producto.price:.2f}\n"
+        mensaje += "─" * 20 + "\n"
+
+    mensaje += "\nEjemplo: Escribe 'A' para ver el detalle del primer producto"
+    if pagina_actual > 1:
+        mensaje += "\nEscribe 'P' para ver la página anterior"
+    if hay_mas_productos:
+        mensaje += "\nEscribe 'N' para ver la página siguiente"
+    mensaje += "\nO escribe 0 para cancelar la búsqueda"
+
+    await message.reply_text(mensaje, parse_mode='HTML')
+    return True
+
+
+async def buscar_productos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia el flujo de búsqueda de productos."""
+    message = _get_accessible_message(update)
+    if not message:
+        return ConversationHandler.END
+
+    log_bot_event(logger, update, "Iniciando busqueda de productos")
+
+    await message.reply_text(
+        "🔎 *Buscar productos*\n\n"
+        "Escribí una palabra o parte del nombre/descripción del producto.\n"
+        f"Mínimo *{MIN_SEARCH_LENGTH}* caracteres.",
+        parse_mode='Markdown',
+    )
+    return EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+
+
+async def procesar_busqueda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recibe el término de búsqueda y muestra resultados."""
+    message = _get_accessible_message(update)
+    if not message or not message.text:
+        return ConversationHandler.END
+
+    user_data = _get_user_data(context)
+    texto = message.text.strip()
+
+    if texto.lower() in ['0', 'cancelar']:
+        await message.reply_text("Búsqueda cancelada.")
+        _clear_product_navigation_state(user_data)
+        return ConversationHandler.END
+
+    if len(texto) < MIN_SEARCH_LENGTH:
+        await message.reply_text(
+            f"⚠️ El término de búsqueda debe tener al menos *{MIN_SEARCH_LENGTH}* caracteres.\n"
+            "Intentá de nuevo o escribí 0 para cancelar.",
+            parse_mode='Markdown',
+        )
+        return EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+
+    user_data['termino_busqueda'] = texto
+    user_data['pagina_productos'] = 1
+
+    log_bot_event(
+        logger,
+        update,
+        "Buscando productos",
+        extra={"termino": texto},
+    )
+
+    encontro_resultados = await mostrar_resultados_busqueda_texto(update, context)
+    if not encontro_resultados:
+        # Permitir que el usuario ingrese otro término.
+        return EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+    return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+
+
+async def seleccionar_producto_busqueda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Procesa la selección de producto dentro de los resultados de búsqueda."""
+    message = _get_accessible_message(update)
+    texto: str | None = message.text.strip().upper() if message and message.text else None
+
+    if not message or texto is None:
+        return ConversationHandler.END
+
+    user_data = _get_user_data(context)
+    pagina_actual_raw = user_data.get('pagina_productos', 1)
+    pagina_actual = pagina_actual_raw if isinstance(pagina_actual_raw, int) and pagina_actual_raw > 0 else 1
+    hay_mas_productos = bool(user_data.get('hay_mas_productos', False))
+
+    if texto == "0":
+        await message.reply_text("Búsqueda cancelada.")
+        _clear_product_navigation_state(user_data)
+        return ConversationHandler.END
+
+    if texto == "P":
+        if pagina_actual == 1:
+            await message.reply_text("Ya estás en la primera página.")
+            return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+        user_data['pagina_productos'] = pagina_actual - 1
+        await mostrar_resultados_busqueda_texto(update, context)
+        return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+
+    if texto == "N":
+        if not hay_mas_productos:
+            await message.reply_text("No hay más productos para mostrar.")
+            return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+        user_data['pagina_productos'] = pagina_actual + 1
+        encontro_resultados = await mostrar_resultados_busqueda_texto(update, context)
+        if not encontro_resultados:
+            return EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+        return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+
+    if 'productos_actuales' not in user_data or 'opciones_productos' not in user_data:
+        await message.reply_text(
+            "Error en la sesión. Por favor, empezá de nuevo con /buscar"
+        )
+        return ConversationHandler.END
+
+    productos = cast(list[ProductDTO], user_data['productos_actuales'])
+    opciones = cast(list[str], user_data['opciones_productos'])
+
+    if texto in opciones:
+        indice = opciones.index(texto)
+        producto = productos[indice]
+        user_data['producto_actual'] = producto
+        log_bot_event(
+            logger,
+            update,
+            "Producto seleccionado desde busqueda",
+            extra={"producto_id": producto.id, "producto_nombre": producto.name},
+        )
+        await mostrar_detalle_producto(update, context, producto)
+        return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+
+    opciones_texto = ", ".join(opciones)
+    navegacion = []
+    if pagina_actual > 1:
+        navegacion.append("P")
+    if hay_mas_productos:
+        navegacion.append("N")
+    if navegacion:
+        opciones_texto = f"{opciones_texto}, {', '.join(navegacion)}"
+
+    await message.reply_text(
+        f"❌ Opción no válida. Letras disponibles: {opciones_texto}\n"
+        "O escribe 0 para cancelar la búsqueda"
+    )
+    return EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
 
 
 async def cancelar_opcion_producto(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -27,6 +27,9 @@ from shared.handlers.commands import (
     cancelar_opcion_producto,
     seleccionar_categoria,
     seleccionar_producto,
+    buscar_productos,
+    procesar_busqueda,
+    seleccionar_producto_busqueda,
     agregar_y_salir_flujo_productos,
     mensajes_texto,
     obtener_categorias,
@@ -92,7 +95,6 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
     app = Application.builder().token(bot_token).build()
     logger.info("✅ Application creada")
     
-    app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler("mi_pedido", ver_pedido))
 
     products_conv_handler = ConversationHandler(
@@ -120,6 +122,31 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
     )
     app.add_handler(products_conv_handler)
 
+    search_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("buscar", buscar_productos),
+            MessageHandler(filters.Regex('^🔎 Buscar$'), buscar_productos),
+        ],
+        states={
+            EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_busqueda)
+            ],
+            EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, seleccionar_producto_busqueda),
+                CallbackQueryHandler(agregar_y_salir_flujo_productos, pattern='^add_'),
+                CallbackQueryHandler(manejar_botones_carrito, pattern='^(info_|prod_)')
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancelar_productos", cancelar_opcion_producto),
+            CommandHandler("mi_pedido", ver_pedido),
+            CommandHandler('ayuda', ver_ayuda),
+        ],
+        allow_reentry=True,
+        name="flujo_busqueda"
+    )
+    app.add_handler(search_conv_handler)
+
     carrito_conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(entrar_modo_modificacion, pattern='^modificar_carrito$')
@@ -146,8 +173,11 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
 
     # Crear ConversationHandler para el email
     email_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('inicio_cliente', cmd_inicio_cliente)],
-            states={
+        entry_points=[
+            CommandHandler('start', start),
+            CommandHandler('inicio_cliente', cmd_inicio_cliente),
+        ],
+        states={
             EstadoConversacion.ESPERANDO_EMAIL.value: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_email)
             ],
@@ -158,7 +188,6 @@ def create_and_initialize_app(bot_token, bot_mode, initialize_app=True):
         fallbacks=[
             CommandHandler('cancelar', cancelar_ingreso_email),
             CommandHandler('ayuda', ver_ayuda),
-            CommandHandler('start', reiniciar_desde_fallback),
         ],
         allow_reentry=True,
         name="flujo_registro_email"

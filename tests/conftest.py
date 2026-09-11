@@ -162,6 +162,14 @@ def _build_persistent_db(conn: sqlite3.Connection):
             cur = self._conn.cursor()
             try:
                 cur.execute(query, params)
+
+                # Queries with RETURNING must be read before commit.
+                has_returning = 'RETURNING' in query.upper()
+                if has_returning and not fetchone and not fetchall:
+                    row = cur.fetchone()
+                    self._conn.commit()
+                    return row[0] if row else None
+
                 self._conn.commit()
                 if fetchone:
                     return cur.fetchone()

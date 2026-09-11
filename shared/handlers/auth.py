@@ -87,6 +87,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if datos_cliente and datos_cliente.get('email'):
         # Ya tiene email, mostrar menú principal
         await mostrar_menu_principal(update, context, usuario.first_name)
+        return ConversationHandler.END
     else:
         # No tiene email, solicitarlo
         await message.reply_text(
@@ -104,6 +105,7 @@ async def ver_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📋 *Ayuda - Comandos disponibles:*\n\n"
         "• /start - Iniciar conversación y verificar email\n"
         "• /ver_productos - Ver categorías y productos disponibles\n"
+        "• /buscar - Buscar productos por nombre o descripción\n"
         "• /carrito - Ver tu pedido actual\n"
         "• /checkout - Finalizar compra\n"
         "• /mis_pedidos - Ver historial de pedidos\n"
@@ -131,15 +133,18 @@ async def recibir_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Generar código de verificación
     codigo = generar_codigo_verificacion()
 
-    send_result = send_verification_email(
-        recipient_email=email,
-        verification_code=codigo,
-        recipient_name=getattr(update, "effective_user", None).first_name if getattr(update, "effective_user", None) else None,
+    user = getattr(update, "effective_user", None)
+    user_name = user.first_name if user else None
+
+    sent_ok = send_verification_email(
+        email=email,
+        code=codigo,
+        user_name=user_name,
     )
 
-    if not send_result.success:
+    if not sent_ok:
         await message.reply_text(
-            send_result.error_message or "❌ No se pudo enviar el código de verificación. Intenta nuevamente."
+            "❌ No se pudo enviar el código de verificación. Intenta nuevamente."
         )
         return EstadoConversacion.ESPERANDO_EMAIL.value
 
@@ -214,8 +219,9 @@ async def cancelar_ingreso_email(update: Update, context: ContextTypes.DEFAULT_T
 def reply_markup_principal():
     """Teclado principal."""
     keyboard = [
-        ['🛍️ Ver Productos', '🛒 Mi Pedido'],
-        ['📋 Mis Pedidos', 'ℹ️ Ayuda'],
+        ['🛍️ Ver Productos', '🔎 Buscar'],
+        ['🛒 Mi Pedido', '📋 Mis Pedidos'],
+        ['ℹ️ Ayuda'],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 

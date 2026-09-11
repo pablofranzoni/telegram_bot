@@ -100,20 +100,19 @@ CREATE TABLE IF NOT EXISTS product_inventory (
 
 -- Tabla invoices
 CREATE TABLE IF NOT EXISTS invoices (
-    id INTEGER,
+    id TEXT PRIMARY KEY,
     folio INTEGER UNIQUE,
     customer_id INTEGER NOT NULL,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     estado TEXT DEFAULT 'pendiente',
     total REAL DEFAULT 0.0,
-    PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(customer_id) REFERENCES customers(id)
 );
 
 -- Tabla invoice_items
 CREATE TABLE IF NOT EXISTS invoice_items (
     id INTEGER,
-    invoice_id INTEGER NOT NULL,
+    invoice_id TEXT NOT NULL,
     product_id INTEGER NOT NULL,
     cantidad INTEGER NOT NULL,
     precio_unitario REAL NOT NULL,
@@ -128,7 +127,7 @@ CREATE TABLE IF NOT EXISTS payments (
     id INTEGER,
     telegram_id INTEGER NOT NULL,
     mp_payment_id TEXT UNIQUE,
-    invoice_id INTEGER,
+    invoice_id TEXT,
     monto NUMERIC NOT NULL,
     concepto TEXT,
     estado TEXT DEFAULT 'pendiente',
@@ -142,7 +141,7 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS sent_documents (
     id INTEGER,
     document_type TEXT NOT NULL,
-    invoice_id INTEGER NOT NULL,
+    invoice_id TEXT NOT NULL,
     delivery_channel TEXT NOT NULL,
     recipient_target TEXT NOT NULL,
     file_name TEXT NOT NULL,

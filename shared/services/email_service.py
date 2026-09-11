@@ -1,26 +1,190 @@
-# shared/services/email_service.py
-"""
-Email service for sending verification codes and password reset tokens.
+"""Email service with optional real SMTP delivery and a development mock mode.
 
-In development, emails are printed to console and stored in memory.
-In production, this should be replaced with real SMTP integration.
+The service reads ``EMAIL_MOCK`` from ``utils.config.Config``:
+- ``EMAIL_MOCK=true`` (default): logs emails in memory and to the console.
+- ``EMAIL_MOCK=false``: sends emails through the configured SMTP server
+  (Gmail by default).
 """
+
+from __future__ import annotations
 
 import logging
-from typing import Dict, Optional, List
+import smtplib
 from datetime import datetime
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email import encoders
+from typing import Dict, List, Optional
 
-from shared.dtos import EmailSendResult, EmailAttachmentDTO
+from shared.dtos.email_dto import EmailAttachmentDTO, EmailSendResult
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Email service with mock implementation for development."""
-    
-    # In-memory storage for development/testing
-    _sent_emails: Dict[str, Dict] = {}
-    
+    """Service for sending emails via SMTP or mocking them in development."""
+
+    _sent_emails: Dict[str, List[Dict]] = {}
+
+    @staticmethod
+    def _load_config():
+        """Lazy load config to avoid circular imports at module import time."""
+        from utils.config import Config
+
+        return Config
+
+    @staticmethod
+    def _is_mock_mode() -> bool:
+        """Return whether email should be mocked instead of sent via SMTP."""
+        try:
+            return EmailService._load_config().EMAIL_MOCK
+        except Exception as e:
+            logger.warning("Could not read EMAIL_MOCK config, defaulting to mock: %s", e)
+            return True
+
+    @staticmethod
+    def _build_multipart_message(
+        subject: str,
+        body_text: str,
+        body_html: Optional[str] = None,
+        to: Optional[List[str]] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        attachments: Optional[List[EmailAttachmentDTO]] = None,
+    ) -> MIMEMultipart:
+        """Build a multipart email message with text, optional HTML and attachments."""
+        config = EmailService._load_config()
+        sender = config.BUSINESS_EMAIL or config.GMAIL_USER or "no-reply@example.com"
+        from_name = config.EMAIL_FROM_NAME or "Telegram Bot"
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"] = f"{from_name} <{sender}>"
+        msg["To"] = ", ".join(to or [])
+        if cc:
+            msg["Cc"] = ", ".join(cc)
+
+        # Body part: alternative text/html
+        body_part = MIMEMultipart("alternative")
+        body_part.attach(MIMEText(body_text, "plain", "utf-8"))
+        if body_html:
+            body_part.attach(MIMEText(body_html, "html", "utf-8"))
+        msg.attach(body_part)
+
+        # Attachments
+        for attachment in attachments or []:
+            part = MIMEBase(*attachment.mime_type.split("/", 1))
+            part.set_payload(attachment.content_bytes)
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f'attachment; filename="{attachment.filename}"',
+            )
+            msg.attach(part)
+
+        return msg
+
+    @staticmethod
+    def _send_via_smtp(
+        msg: MIMEMultipart,
+        recipients: List[str],
+    ) -> EmailSendResult:
+        """Send a prepared message through the configured SMTP server."""
+        config = EmailService._load_config()
+        host = config.SMTP_HOST or "smtp.gmail.com"
+        port = config.SMTP_PORT or 465
+        user = config.GMAIL_USER
+        password = config.GMAIL_APP_PASSWORD
+        sender = config.BUSINESS_EMAIL or config.GMAIL_USER
+
+        if not user or not password:
+            return EmailSendResult(
+                success=False,
+                recipients=recipients,
+                subject=msg["Subject"] or "",
+                attachment_count=0,
+                error_message="SMTP credentials not configured (GMAIL_USER / GMAIL_APP_PASSWORD).",
+            )
+
+        try:
+            with smtplib.SMTP_SSL(host, port, timeout=30) as server:
+                server.login(user, password)
+                server.sendmail(sender, recipients, msg.as_string())
+            return EmailSendResult(
+                success=True,
+                recipients=recipients,
+                subject=msg["Subject"] or "",
+                attachment_count=0,
+            )
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error("SMTP authentication failed: %s", e)
+            return EmailSendResult(
+                success=False,
+                recipients=recipients,
+                subject=msg["Subject"] or "",
+                error_message="Authentication failed. Check GMAIL_USER and GMAIL_APP_PASSWORD.",
+            )
+        except smtplib.SMTPConnectError as e:
+            logger.error("SMTP connection error: %s", e)
+            return EmailSendResult(
+                success=False,
+                recipients=recipients,
+                subject=msg["Subject"] or "",
+                error_message="Could not connect to SMTP server.",
+            )
+        except Exception as e:
+            logger.error("SMTP send error: %s", e)
+            return EmailSendResult(
+                success=False,
+                recipients=recipients,
+                subject=msg["Subject"] or "",
+                error_message=f"Failed to send email: {e}",
+            )
+
+    @staticmethod
+    def _mock_send(
+        subject: str,
+        body_text: str,
+        to: List[str],
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        attachments: Optional[List[EmailAttachmentDTO]] = None,
+        email_type: str = "general",
+    ) -> EmailSendResult:
+        """Mock email delivery: log in memory and return success."""
+        all_recipients = list(to or [])
+        if cc:
+            all_recipients.extend(cc)
+        if bcc:
+            all_recipients.extend(bcc)
+
+        email_body = body_text
+        if attachments:
+            email_body += f"\n\n--- Attachments ({len(attachments)}) ---\n"
+            for att in attachments:
+                email_body += f"  • {att.filename} ({att.mime_type})\n"
+
+        EmailService._log_email(
+            email=", ".join(to) if to else "no-recipients",
+            subject=subject,
+            body=email_body,
+            email_type=email_type,
+            cc=cc,
+            bcc=bcc,
+            attachment_count=len(attachments or []),
+        )
+
+        logger.info("[MOCK] Email to %s with %s attachments", to, len(attachments or []))
+
+        return EmailSendResult(
+            success=True,
+            recipients=all_recipients,
+            subject=subject,
+            attachment_count=len(attachments or []),
+            error_message=None,
+        )
+
     @staticmethod
     def send_email(
         subject: str,
@@ -29,174 +193,135 @@ class EmailService:
         cc: Optional[List[str]] = None,
         bcc: Optional[List[str]] = None,
         attachments: Optional[List[EmailAttachmentDTO]] = None,
+        body_html: Optional[str] = None,
         email_type: str = "general",
-        smtp_client_factory=None  # For testing/mocking
+        smtp_client_factory=None,  # Kept for backwards compatibility
     ) -> EmailSendResult:
-        """
-        Send an email with optional CC, BCC, and attachments.
+        """Send an email using SMTP or mock delivery depending on EMAIL_MOCK."""
+        all_recipients = list(to or [])
+        if cc:
+            all_recipients.extend(cc)
+        if bcc:
+            all_recipients.extend(bcc)
 
-        This is a mock implementation for development. In production,
-        this would integrate with real SMTP service.
-
-        Args:
-            subject: Email subject line
-            body_text: Email body (plain text)
-            to: List of recipient email addresses
-            cc: List of CC recipients (optional)
-            bcc: List of BCC recipients (optional)
-            attachments: List of EmailAttachmentDTO objects (optional)
-            email_type: Logical email category (e.g. "verification", "password_reset")
-            smtp_client_factory: For testing (not used in mock)
-
-        Returns:
-            EmailSendResult with success status, recipients, and attachment count
-        """
-        try:
-            # Prepare recipients list
-            all_recipients = list(to) if to else []
-            if cc:
-                all_recipients.extend(cc)
-            if bcc:
-                all_recipients.extend(bcc)
-
-            # Build email content
-            email_body = body_text
-
-            # Add attachment info to body for visibility
-            if attachments:
-                email_body += f"\n\n--- Attachments ({len(attachments)}) ---\n"
-                for att in attachments:
-                    email_body += f"  • {att.filename} ({att.mime_type})\n"
-
-            # Log the email (mock implementation)
-            EmailService._log_email(
-                email=", ".join(to) if to else "no-recipients",
+        if EmailService._is_mock_mode():
+            return EmailService._mock_send(
                 subject=subject,
-                body=email_body,
-                email_type=email_type,
+                body_text=body_text,
+                to=to,
                 cc=cc,
                 bcc=bcc,
-                attachment_count=len(attachments or [])
+                attachments=attachments,
+                email_type=email_type,
             )
-            
-            logger.info(f"Email sent to {to} with {len(attachments or [])} attachments")
-            
-            return EmailSendResult(
-                success=True,
-                recipients=all_recipients,
-                subject=subject,
-                attachment_count=len(attachments or []),
-                error_message=None
-            )
-            
-        except Exception as e:
-            logger.error(f"Failed to send email: {str(e)}")
-            return EmailSendResult(
-                success=False,
-                recipients=[],
-                subject=subject,
-                attachment_count=0,
-                error_message=str(e)
-            )
-    
+
+        msg = EmailService._build_multipart_message(
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            attachments=attachments,
+        )
+        return EmailService._send_via_smtp(msg, all_recipients)
+
     @staticmethod
-    def send_verification_email(email: str, code: str, user_name: str) -> bool:
-        """
-        Send verification email with 6-digit code.
-        
-        Args:
-            email: Recipient email address
-            code: 6-digit verification code
-            user_name: User's name for personalization
-        
-        Returns:
-            True if sent successfully, False otherwise
-        """
-        try:
-            subject = "Email Verification Code"
-            body = f"""
-Hello {user_name},
+    def send_verification_email(email: str, code: str, user_name: Optional[str] = None) -> bool:
+        """Send an email verification code."""
+        name = user_name or "Usuario"
+        subject = "Código de verificación"
+        body_text = f"""Hola {name},
 
-Your email verification code is:
+Tu código de verificación es: {code}
 
-    {code}
+Este código expira en 15 minutos. No lo compartas con nadie.
 
-This code will expire in 15 minutes.
-
-Do not share this code with anyone.
-
-Best regards,
-Bot Administration Team
+Saludos,
+{EmailService._load_config().EMAIL_FROM_NAME or 'Telegram Bot'}
 """
-            
-            result = EmailService.send_email(
-                subject=subject,
-                body_text=body,
-                to=[email],
-                email_type="verification"
-            )
+        body_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Código de verificación</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+        <h2 style="color: #1a73e8;">Hola {name},</h2>
+        <p>Tu código de verificación es:</p>
+        <p style="font-size: 32px; font-weight: bold; letter-spacing: 4px; text-align: center; margin: 24px 0; color: #1a73e8;">{code}</p>
+        <p>Este código expira en <strong>15 minutos</strong>. No lo compartas con nadie.</p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+        <p style="font-size: 12px; color: #777;">Saludos,<br>{EmailService._load_config().EMAIL_FROM_NAME or 'Telegram Bot'}</p>
+    </div>
+</body>
+</html>"""
 
-            return result.success
+        result = EmailService.send_email(
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            to=[email],
+            email_type="verification",
+        )
+        return result.success
 
-        except Exception as e:
-            logger.error(f"Failed to send verification email to {email}: {str(e)}")
-            return False
-    
     @staticmethod
     def send_password_reset_email(
         email: str,
         token: str,
         user_name: str,
-        reset_url: Optional[str] = None
+        reset_url: Optional[str] = None,
     ) -> bool:
-        """
-        Send password reset email with reset token/link.
-        
-        Args:
-            email: Recipient email address
-            token: Password reset token
-            user_name: User's name for personalization
-            reset_url: Optional full URL to reset password (e.g., https://app.com/reset?token=...)
-        
-        Returns:
-            True if sent successfully, False otherwise
-        """
-        try:
-            subject = "Password Reset Request"
-            
-            if reset_url:
-                reset_link = reset_url
-            else:
-                reset_link = f"Use token: {token}"
-            
-            body = f"""
-Hello {user_name},
+        """Send a password reset email with token/link."""
+        name = user_name or "Usuario"
+        config = EmailService._load_config()
+        app_name = config.EMAIL_FROM_NAME or "Telegram Bot"
+        link_or_token = reset_url or f"Usa este token: {token}"
 
-You requested a password reset. Use the following link or token to reset your password:
+        subject = "Restablecer contraseña"
+        body_text = f"""Hola {name},
 
-    {reset_link}
+Has solicitado restablecer tu contraseña. Usa el siguiente enlace o token:
 
-This link/token will expire in 1 hour.
+{link_or_token}
 
-If you did not request this, please ignore this email.
+Este token expira en 1 hora. Si no solicitaste esto, ignora este email.
 
-Best regards,
-Bot Administration Team
+Saludos,
+{app_name}
 """
-            
-            result = EmailService.send_email(
-                subject=subject,
-                body_text=body,
-                to=[email],
-                email_type="password_reset"
-            )
+        body_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Restablecer contraseña</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 480px; margin: 0 auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+        <h2 style="color: #1a73e8;">Hola {name},</h2>
+        <p>Has solicitado restablecer tu contraseña. Haz clic en el enlace o usa el token:</p>
+        <p style="text-align: center; margin: 24px 0;">
+            <a href="{reset_url or '#'}" style="background: #1a73e8; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Restablecer contraseña</a>
+        </p>
+        <p style="word-break: break-all; background: #f5f5f5; padding: 12px; border-radius: 4px;">{link_or_token}</p>
+        <p>Este token expira en <strong>1 hora</strong>. Si no solicitaste esto, ignora este email.</p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 24px 0;">
+        <p style="font-size: 12px; color: #777;">Saludos,<br>{app_name}</p>
+    </div>
+</body>
+</html>"""
 
-            return result.success
+        result = EmailService.send_email(
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            to=[email],
+            email_type="password_reset",
+        )
+        return result.success
 
-        except Exception as e:
-            logger.error(f"Failed to send password reset email to {email}: {str(e)}")
-            return False
-    
     @staticmethod
     def _log_email(
         email: str,
@@ -205,13 +330,9 @@ Bot Administration Team
         email_type: str,
         cc: Optional[List[str]] = None,
         bcc: Optional[List[str]] = None,
-        attachment_count: int = 0
+        attachment_count: int = 0,
     ) -> None:
-        """
-        Log email for development/debugging.
-        
-        In production, this would integrate with real email service (SendGrid, AWS SES, etc).
-        """
+        """Log email for development/debugging."""
         email_record = {
             "to": email,
             "cc": cc or [],
@@ -220,51 +341,41 @@ Bot Administration Team
             "body": body,
             "type": email_type,
             "attachments": attachment_count,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
-        
-        # Store in memory for testing
+
         if email not in EmailService._sent_emails:
             EmailService._sent_emails[email] = []
-        
+
         EmailService._sent_emails[email].append(email_record)
-        
-        # Log to console for development
-        logger.debug(f"\n{'='*60}")
-        logger.debug(f"EMAIL TO: {email}")
+
+        logger.debug("\n%s", "=" * 60)
+        logger.debug("EMAIL TO: %s", email)
         if cc:
-            logger.debug(f"CC: {', '.join(cc)}")
+            logger.debug("CC: %s", ", ".join(cc))
         if bcc:
-            logger.debug(f"BCC: {', '.join(bcc)} (hidden in real email)")
-        logger.debug(f"SUBJECT: {subject}")
+            logger.debug("BCC: %s", ", ".join(bcc))
+        logger.debug("SUBJECT: %s", subject)
         if attachment_count > 0:
-            logger.debug(f"ATTACHMENTS: {attachment_count}")
-        logger.debug(f"{'='*60}")
-        logger.debug(body)
-        logger.debug(f"{'='*60}\n")
-    
+            logger.debug("ATTACHMENTS: %s", attachment_count)
+        logger.debug("%s", "=" * 60)
+        logger.debug("%s", body)
+        logger.debug("%s", "=" * 60)
+
     @staticmethod
     def get_sent_emails(email: Optional[str] = None) -> Dict:
-        """
-        Get sent emails (for testing).
-        
-        Args:
-            email: If provided, get emails for specific recipient. Otherwise get all.
-        
-        Returns:
-            Dictionary of sent emails
-        """
+        """Get sent emails (for testing)."""
         if email:
             return EmailService._sent_emails.get(email, [])
         return EmailService._sent_emails
-    
+
     @staticmethod
     def clear_sent_emails() -> None:
         """Clear sent emails history (for testing)."""
         EmailService._sent_emails.clear()
 
 
-# Module-level wrapper functions for backwards compatibility with imports
+# Module-level wrapper functions for backwards compatibility with imports.
 def send_email(
     subject: str,
     body_text: str,
@@ -272,7 +383,8 @@ def send_email(
     cc: Optional[List[str]] = None,
     bcc: Optional[List[str]] = None,
     attachments: Optional[List[EmailAttachmentDTO]] = None,
-    smtp_client_factory=None
+    body_html: Optional[str] = None,
+    smtp_client_factory=None,
 ) -> EmailSendResult:
     """Wrapper for EmailService.send_email()."""
     return EmailService.send_email(
@@ -282,29 +394,26 @@ def send_email(
         cc=cc,
         bcc=bcc,
         attachments=attachments,
-        smtp_client_factory=smtp_client_factory
+        body_html=body_html,
+        smtp_client_factory=smtp_client_factory,
     )
 
 
-def send_verification_email(email: str, code: str, user_name: str) -> bool:
+def send_verification_email(email: str, code: str, user_name: Optional[str] = None) -> bool:
     """Wrapper for EmailService.send_verification_email()."""
-    return EmailService.send_verification_email(
-        email=email,
-        code=code,
-        user_name=user_name
-    )
+    return EmailService.send_verification_email(email=email, code=code, user_name=user_name)
 
 
 def send_password_reset_email(
     email: str,
     token: str,
     user_name: str,
-    reset_url: Optional[str] = None
+    reset_url: Optional[str] = None,
 ) -> bool:
     """Wrapper for EmailService.send_password_reset_email()."""
     return EmailService.send_password_reset_email(
         email=email,
         token=token,
         user_name=user_name,
-        reset_url=reset_url
+        reset_url=reset_url,
     )

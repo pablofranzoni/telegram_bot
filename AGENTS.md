@@ -14,6 +14,7 @@
 - **Bot mode is webhook-only.** `bot_core.py:create_and_initialize_app` raises `ValueError` if `bot_mode != "WEBHOOK"`. `bot_pa.py` coerces `BOT_MODE` to `WEBHOOK` and logs a warning.
 - **Webhook URL must include a path token AND a secret header.** `bot_pa.py:webhook()` requires both `TELEGRAM_WEBHOOK_PATH_TOKEN` (URL segment) and `TELEGRAM_WEBHOOK_SECRET_TOKEN` (header `X-Telegram-Bot-Api-Secret-Token`) to be set; otherwise it returns 503. The configured webhook URL is `f"{WEBHOOK_URL}/webhook/{TELEGRAM_WEBHOOK_PATH_TOKEN}"` and must start with `https://`.
 - **Default DB type is PostgreSQL** (`utils/config.py:Config.DB_TYPE = DatabaseType.POSTGRESQL` — the SQLITE line is commented out). Tests force `DB_TYPE=sqlite` + `DATABASE_PATH=:memory:` in `tests/conftest.py` before importing the app.
+- **Invoice IDs are UUID v7 in both PostgreSQL and SQLite.** `invoices.id` and all `invoice_id` foreign keys are stored as `UUID` in PostgreSQL (via `pg_uuidv7`) and as `TEXT` in SQLite. New invoices receive a UUID v7 generated in pure Python by `utils/uuid_utils.py:uuidv7()`; no native SQLite UUID extension is required. Legacy SQLite databases with integer invoice IDs are migrated by `database/schema/sqlite/005_migrate_invoices_to_uuid.sql` (UUID v4 is generated for existing rows; new rows use v7).
 - **SQL placeholders.** SQL written for SQLite uses `?`; `db_pgsql.py:_adapt_query` rewrites `?` to `%s` and strips `INSERT OR IGNORE`. Don't use psycopg2 `%`-formatting style by hand in new code — the adapter handles it.
 - **Response formatting for bot output.** Use `utils/formatters.py:TelegramTable(rows, headers=None)` for tabular results (categories, products, etc.). Build via `RowAdapterFactory.create(row, headers)` for sqlite3.Row / psycopg2 RealDictRow / plain tuples. Empty rows render as `<pre>Sin resultados</pre>`.
 - **Auth on `/api/*` routes** uses `@api_token_required` (JWT, `shared/decorators.py`) and optionally `@admin_required` (must come **after** `@api_token_required`). The login route is `/api/auth/login` (`routes/auth_routes.py`).
@@ -90,6 +91,20 @@ PostgreSQL notes:
 app starts (the schema executes `CREATE EXTENSION IF NOT EXISTS pg_uuidv7`).
 - If tables were created by a different user, the runtime user will not be able
 to create indexes on them; use `apply_schema.py` with the table owner.
+
+SQLite in production (low-cost deployments):
+- SQLite is a valid low-cost production option. Set `DB_TYPE=sqlite` and
+`DATABASE_PATH=/absolute/path/to/db.sqlite` (or `SQLITE_PATH`).
+- Use an absolute path. On PythonAnywhere this is required; on other hosts a
+relative path can be lost across deploys or worker restarts.
+- Enable WAL for concurrency: it is already set in `database/db_sqlite.py`
+(`PRAGMA journal_mode = WAL`). Do not disable it.
+- Backups are just file copies. Schedule periodic copies of the database file
+and the `-wal`/`-shm` siblings while the database is idle or use SQLite's
+`backup()` API.
+- For moderate write concurrency, keep transactions short. The bot uses one
+connection per request; long-running operations can block writers.
+- Schema changes must still be applied with `python database/apply_schema.py --database sqlite --db-path <path>`.
 
 Legacy databases that already contain the correct schema can be synchronized
 with the migration tracker by running `apply_schema.py --mark-applied`. This

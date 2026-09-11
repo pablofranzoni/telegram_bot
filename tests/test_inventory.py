@@ -4,6 +4,7 @@ import pytest
 
 from database.db_manager import get_db
 from shared.services.inventory_service import add_stock, get_inventory
+from utils.uuid_utils import uuidv7
 from utils.database import (
     confirmar_venta_inventory,
     create_inventory_row_db,
@@ -68,9 +69,10 @@ def _create_test_invoice(db, customer_id, product_id, quantity, unit_price):
         (customer_id,),
         fetchone=True,
     )
-    invoice_id = db.execute(
-        "INSERT INTO invoices (customer_id, total) VALUES (?, ?)",
-        (customer["id"], quantity * unit_price),
+    invoice_id = uuidv7()
+    db.execute(
+        "INSERT INTO invoices (id, customer_id, total) VALUES (?, ?, ?)",
+        (invoice_id, customer["id"], quantity * unit_price),
     )
     db.execute(
         """

@@ -155,7 +155,7 @@ class TestSendVerificationEmail:
         )
         
         sent_emails = email_service.EmailService.get_sent_emails("test@example.com")
-        assert "Verification" in sent_emails[0]["subject"]
+        assert "verificación" in sent_emails[0]["subject"].lower()
 
 
 class TestSendPasswordResetEmail:
@@ -214,4 +214,4 @@ class TestSendPasswordResetEmail:
         )
         
         sent_emails = email_service.EmailService.get_sent_emails("test@example.com")
-        assert "Password Reset" in sent_emails[0]["subject"]
+        assert "restablecer" in sent_emails[0]["subject"].lower()

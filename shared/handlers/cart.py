@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, TelegramError
 
-from shared.handlers.products import obtener_categorias
+from shared.handlers.products import buscar_productos, obtener_categorias
 from shared.dtos import CartMutationResult
 from utils.constants import EstadoConversacion
 from utils.logger_factory import get_bot_logger, log_bot_event
@@ -1366,6 +1366,9 @@ async def mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if texto.lower() in ['ver productos', 'productos', 'menú', 'menu', '🛍️ ver productos']:
         await obtener_categorias(update, context)
 
+    elif texto.lower() in ['buscar', '🔎 buscar']:
+        await buscar_productos(update, context)
+
     elif texto.lower() in ['mi pedido', 'pedido', 'carrito', '🛒 mi pedido']:
         await ver_pedido(update, context)
 
@@ -1380,6 +1383,7 @@ async def mensajes_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "*Ayuda del Bot de Pedidos*\n\n"
             "• *🛍️ Ver Productos*: Explora nuestro menú\n"
+            "• *🔎 Buscar*: Encontra un producto por nombre o descripción\n"
             "• *🛒 Mi Pedido*: Revisa tu pedido actual\n"
             "• *📋 Mis Pedidos*: Historial de compras\n\n"
             "Para agregar productos, selecciona una categoría y luego el producto. Puedes modificar tu pedido antes de finalizarlo.\n\n",

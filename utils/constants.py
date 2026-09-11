@@ -9,6 +9,10 @@ class EstadoConversacion(Enum):
     ESPERANDO_CATEGORIA = auto()
     ESPERANDO_PRODUCTO = auto()
 
+    # Búsqueda de productos
+    ESPERANDO_TEXTO_BUSQUEDA = auto()
+    ESPERANDO_PRODUCTO_BUSQUEDA = auto()
+
     # Modificación del carrito
     MODIFICANDO_CARRITO = auto()
 

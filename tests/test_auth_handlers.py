@@ -41,7 +41,7 @@ async def test_start_with_existing_customer_shows_main_menu(monkeypatch):
 
     result = await auth.start(update, context)
 
-    assert result is None
+    assert result == ConversationHandler.END
     assert shown == {"called": True, "name": "Ana"}
     message.reply_text.assert_not_awaited()
 
@@ -89,11 +89,7 @@ async def test_recibir_email_stores_code_and_email(monkeypatch):
     monkeypatch.setattr(
         auth,
         "send_verification_email",
-        lambda recipient_email, verification_code, recipient_name=None: EmailSendResult(
-            success=True,
-            recipients=[recipient_email],
-            subject="Tu codigo de verificacion",
-        ),
+        lambda email, code, user_name=None: True,
     )
 
     result = await auth.recibir_email(update, context)
@@ -121,19 +117,14 @@ async def test_recibir_email_returns_error_when_email_send_fails(monkeypatch):
     monkeypatch.setattr(
         auth,
         "send_verification_email",
-        lambda recipient_email, verification_code, recipient_name=None: EmailSendResult(
-            success=False,
-            recipients=[recipient_email],
-            subject="Tu codigo de verificacion",
-            error_message="❌ No se pudo enviar el email",
-        ),
+        lambda email, code, user_name=None: False,
     )
 
     result = await auth.recibir_email(update, context)
 
     assert result == EstadoConversacion.ESPERANDO_EMAIL.value
     assert context.user_data == {}
-    message.reply_text.assert_awaited_once_with("❌ No se pudo enviar el email")
+    message.reply_text.assert_awaited_once_with("❌ No se pudo enviar el código de verificación. Intenta nuevamente.")
 
 
 @pytest.mark.asyncio

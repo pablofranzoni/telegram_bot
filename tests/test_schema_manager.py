@@ -126,7 +126,7 @@ def test_apply_mode_is_idempotent():
         "SELECT COUNT(*) AS total FROM schema_migrations",
         fetchone=True,
     )
-    assert count["total"] == 4
+    assert count["total"] == 5
 
 
 def test_verify_mode_passes_when_fully_migrated():

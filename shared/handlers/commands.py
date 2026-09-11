@@ -25,6 +25,10 @@ from .products import (
     mostrar_productos_categoria,
     seleccionar_producto,
     cancelar_opcion_producto,
+    buscar_productos,
+    procesar_busqueda,
+    seleccionar_producto_busqueda,
+    mostrar_resultados_busqueda_texto,
 )
 
 from .cart import (
@@ -72,6 +76,10 @@ __all__ = [
     "mostrar_productos_categoria",
     "seleccionar_producto",
     "cancelar_opcion_producto",
+    "buscar_productos",
+    "procesar_busqueda",
+    "seleccionar_producto_busqueda",
+    "mostrar_resultados_busqueda_texto",
     "agregar_y_salir_flujo_productos",
     "manejar_botones_carrito",
     "ver_pedido",

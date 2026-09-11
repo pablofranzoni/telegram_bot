@@ -269,3 +269,193 @@ async def test_cancelar_opcion_producto_clears_session():
     message.reply_text.assert_awaited_once()
     args, _ = message.reply_text.await_args
     assert "operación cancelada" in args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_buscar_productos_starts_search_flow(monkeypatch):
+    message = _build_message()
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context()
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+
+    result = await products.buscar_productos(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+    message.reply_text.assert_awaited_once()
+    args, kwargs = message.reply_text.await_args
+    assert "buscar productos" in args[0].lower()
+    assert kwargs["parse_mode"] == "Markdown"
+
+
+@pytest.mark.asyncio
+async def test_procesar_busqueda_rejects_short_query(monkeypatch):
+    message = _build_message("ab")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context()
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+
+    result = await products.procesar_busqueda(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+    message.reply_text.assert_awaited_once()
+    args, _ = message.reply_text.await_args
+    assert "3* caracteres" in args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_procesar_busqueda_cancels_on_zero(monkeypatch):
+    message = _build_message("0")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context({"termino_busqueda": "coca"})
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+
+    result = await products.procesar_busqueda(update, context)
+
+    assert result == ConversationHandler.END
+    assert context.user_data == {}
+    message.reply_text.assert_awaited_once_with("Búsqueda cancelada.")
+
+
+@pytest.mark.asyncio
+async def test_procesar_busqueda_shows_results(monkeypatch):
+    message = _build_message("coca")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context()
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+    monkeypatch.setattr(
+        products,
+        "search_products",
+        lambda query, page, page_size: (
+            [
+                ProductDTO(id=5, name="Coca-Cola", description="Bebida 500ml", price=Decimal("2.50")),
+            ],
+            False,
+        ),
+    )
+
+    result = await products.procesar_busqueda(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+    assert context.user_data["termino_busqueda"] == "coca"
+    assert context.user_data["pagina_productos"] == 1
+    assert context.user_data["opciones_productos"] == ["A"]
+    assert context.user_data["modo_busqueda"] is True
+    message.reply_text.assert_awaited_once()
+    args, kwargs = message.reply_text.await_args
+    assert "coca" in args[0].lower()
+    assert kwargs["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_procesar_busqueda_no_results(monkeypatch):
+    message = _build_message("xyz123")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context()
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+    monkeypatch.setattr(products, "search_products", lambda query, page, page_size: ([], False))
+
+    result = await products.procesar_busqueda(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+    message.reply_text.assert_awaited_once()
+    args, kwargs = message.reply_text.await_args
+    assert "no encontré productos" in args[0].lower()
+    assert kwargs["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_procesar_busqueda_no_results_escapes_html(monkeypatch):
+    message = _build_message("<especial>&")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context()
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+    monkeypatch.setattr(products, "search_products", lambda query, page, page_size: ([], False))
+
+    result = await products.procesar_busqueda(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_TEXTO_BUSQUEDA.value
+    message.reply_text.assert_awaited_once()
+    args, kwargs = message.reply_text.await_args
+    assert "&lt;especial&gt;&amp;" in args[0]
+    assert kwargs["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
+async def test_seleccionar_producto_busqueda_stores_product_and_shows_detail(monkeypatch):
+    message = _build_message("A")
+    product = ProductDTO(id=5, name="Coca-Cola", description="Bebida 500ml", price=Decimal("2.50"))
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context(
+        {
+            "termino_busqueda": "coca",
+            "productos_actuales": [product],
+            "opciones_productos": ["A"],
+            "pagina_productos": 1,
+            "hay_mas_productos": False,
+        }
+    )
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+    shown: dict[str, object] = {}
+
+    async def fake_show(update_arg, context_arg, producto):
+        shown["producto"] = producto
+
+    monkeypatch.setattr(products, "mostrar_detalle_producto", fake_show)
+
+    result = await products.seleccionar_producto_busqueda(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+    assert context.user_data["producto_actual"] == product
+    assert shown["producto"] == product
+
+
+@pytest.mark.asyncio
+async def test_seleccionar_producto_busqueda_cancels_on_zero(monkeypatch):
+    message = _build_message("0")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context({"termino_busqueda": "coca", "productos_actuales": []})
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+
+    result = await products.seleccionar_producto_busqueda(update, context)
+
+    assert result == ConversationHandler.END
+    assert context.user_data == {}
+    message.reply_text.assert_awaited_once_with("Búsqueda cancelada.")
+
+
+@pytest.mark.asyncio
+async def test_seleccionar_producto_busqueda_next_page(monkeypatch):
+    message = _build_message("N")
+    update = SimpleNamespace(message=message, callback_query=None)
+    context = _build_context(
+        {
+            "termino_busqueda": "coca",
+            "productos_actuales": [ProductDTO(id=5, name="Coca-Cola", description="Bebida", price=Decimal("2.50"))],
+            "opciones_productos": ["A"],
+            "pagina_productos": 1,
+            "hay_mas_productos": True,
+        }
+    )
+
+    monkeypatch.setattr(products, "_get_accessible_message", lambda update_arg: message)
+    shown = {"count": 0}
+
+    async def fake_show(update_arg, context_arg):
+        shown["count"] += 1
+        return True
+
+    monkeypatch.setattr(products, "mostrar_resultados_busqueda_texto", fake_show)
+
+    result = await products.seleccionar_producto_busqueda(update, context)
+
+    assert result == EstadoConversacion.ESPERANDO_PRODUCTO_BUSQUEDA.value
+    assert context.user_data["pagina_productos"] == 2
+    assert shown["count"] == 1

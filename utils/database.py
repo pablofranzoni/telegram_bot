@@ -4,13 +4,23 @@ from typing import Any
 from database.db import DatabaseError
 from database.db_manager import get_db
 from shared.record_utils import get_record_value
+from utils.uuid_utils import uuidv7
 
 logger = logging.getLogger(__name__)
 
 
 def _invoice_param_type(invoice_id):
-    """Return query param type for invoice id supporting both int and UUID/text."""
-    return 'text' if isinstance(invoice_id, str) else 'integer'
+    """Return query param type for invoice id.
+
+    Invoice identifiers are UUID strings in both SQLite and PostgreSQL.
+    The legacy integer branch is kept for defensive compatibility during
+    the transition period.
+    """
+    if isinstance(invoice_id, str):
+        return 'text'
+    if isinstance(invoice_id, int):
+        return 'integer'
+    return 'text'
 
 
 def _execute_db(db, query, params=(), fetchone=False, fetchall=False, param_types=None):
@@ -103,6 +113,39 @@ def obtener_productos_por_categoria_paginados(categoria, limite, offset=0):
         return []
 
 
+def buscar_productos_db(termino, limite, offset=0):
+    """Busca productos disponibles por nombre o descripción (parcial, case-insensitive)."""
+    logger.debug(
+        "Buscando productos",
+        extra={"termino": termino, "limite": limite, "offset": offset},
+    )
+    try:
+        db = get_db()
+        patron = f"%{termino}%"
+        productos: list[Any] | None = db.execute('''
+                SELECT products.id, products.nombre, products.descripcion, products.precio
+                FROM products
+                WHERE products.disponible = ?
+                  AND (
+                      LOWER(products.nombre) LIKE LOWER(?)
+                      OR LOWER(products.descripcion) LIKE LOWER(?)
+                  )
+                ORDER BY products.nombre
+                LIMIT ? OFFSET ?
+            ''', (1, patron, patron, limite, offset), fetchall=True,
+            param_types=['boolean', 'text', 'text', 'integer', 'integer'])
+        if productos is not None:
+            return [
+                (row['id'], row['nombre'], row['descripcion'], row['precio'])
+                for row in productos
+            ]
+        return []
+
+    except DatabaseError as e:
+        logger.error("Error al buscar productos con termino %s: %s", termino, e)
+        return []
+
+
 def obtener_producto_por_id(product_id):
     """Obtiene información de un producto específico, incluyendo inventario."""
     try:
@@ -177,8 +220,12 @@ def crear_pedido(customer_id):
             return None
         customer_id = customer['id']
 
-        invoice_id = db.execute('INSERT INTO invoices (customer_id) VALUES (?)', 
-                                (customer_id,), param_types=['integer'])
+        invoice_id = uuidv7()
+        db.execute(
+            'INSERT INTO invoices (id, customer_id) VALUES (?, ?)',
+            (invoice_id, customer_id),
+            param_types=['text', 'integer'],
+        )
         return invoice_id
     
     except DatabaseError as e:
@@ -608,6 +655,7 @@ def documento_ya_enviado(invoice_id, document_type, delivery_channel, recipient_
         if normalized_channel == 'email':
             normalized_target = normalized_target.lower()
 
+        invoice_id_type = _invoice_param_type(invoice_id)
         resultado = db.execute('''
             SELECT 1 FROM sent_documents
             WHERE invoice_id = ?
@@ -617,7 +665,7 @@ def documento_ya_enviado(invoice_id, document_type, delivery_channel, recipient_
               AND status = 'sent'
             LIMIT 1
         ''', (invoice_id, document_type, normalized_channel, normalized_target), fetchone=True,
-            param_types=['integer', 'string', 'string', 'string'])
+            param_types=[invoice_id_type, 'string', 'string', 'string'])
         
         encontrado = resultado is not None
         logger.info(
@@ -649,6 +697,7 @@ def registrar_documento_enviado(invoice_id, document_type, delivery_channel, rec
         if normalized_channel == 'email':
             normalized_target = normalized_target.lower()
 
+        invoice_id_type = _invoice_param_type(invoice_id)
         existing = db.execute(
             '''
                 SELECT id
@@ -658,7 +707,7 @@ def registrar_documento_enviado(invoice_id, document_type, delivery_channel, rec
                   AND delivery_channel = ?
                   AND recipient_target = ?
                 LIMIT 1
-            ''', (document_type, invoice_id, normalized_channel, normalized_target), fetchone=True, param_types=['string', 'integer', 'string', 'string'])
+            ''', (document_type, invoice_id, normalized_channel, normalized_target), fetchone=True, param_types=['string', invoice_id_type, 'string', 'string'])
 
         if existing:
             existing_id = existing.get('id') if isinstance(existing, dict) else existing[0]
@@ -682,7 +731,7 @@ def registrar_documento_enviado(invoice_id, document_type, delivery_channel, rec
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (document_type, invoice_id, normalized_channel, normalized_target, file_name, payment_id, status, error_message), fetchone=False,
-                param_types=['string', 'integer', 'string', 'string', 'string', 'string', 'string', 'string'])
+                param_types=['string', invoice_id_type, 'string', 'string', 'string', 'string', 'string', 'string'])
 
         logger.info(
             "Documento enviado registrado/actualizado",

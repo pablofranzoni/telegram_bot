@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 import sqlite3
 from contextlib import contextmanager
 from typing import Any
@@ -8,9 +9,15 @@ from database.db import DatabaseError, DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
+
 class SQLiteDatabase(DatabaseInterface):
     """Clase simple para manejar conexiones SQLite en PythonAnywhere"""
-    
+
+    _INSERT_RETURNING_REGEX = re.compile(
+        r"^\s*INSERT\s+(?:OR\s+(?:IGNORE|REPLACE|ROLLBACK|ABORT|FAIL)\s+)?INTO\s+(?P<table>[a-zA-Z_][a-zA-Z0-9_]*)\b",
+        re.IGNORECASE,
+    )
+
     def __init__(self, db_path=None):
         # En PythonAnywhere, la ruta debe ser absoluta
         if db_path is None:
@@ -60,17 +67,39 @@ class SQLiteDatabase(DatabaseInterface):
             cursor.close()
             conn.close()
     
+    def _should_return_inserted_id(self, query: str, fetchone: bool, fetchall: bool) -> bool:
+        """Return whether an INSERT should fetch and return the generated key."""
+        if fetchone or fetchall:
+            return False
+        if 'RETURNING' in query.upper():
+            return False
+        return self._INSERT_RETURNING_REGEX.match(query) is not None
+
+    def _append_returning_id(self, query: str) -> str:
+        """Append RETURNING id to INSERT statements needing the inserted key."""
+        return f"{query.rstrip().rstrip(';')} RETURNING id"
+
     def execute(self, query, params=(), fetchone=False, fetchall=False, param_types=None) -> Any | list[Any] | int | None:
         """Ejecutar consulta simple"""
         # param_types se mantiene en la firma por compatibilidad con DatabaseInterface
         # y los adaptadores PostgreSQL/MySQL, pero SQLite no lo necesita.
         conn = self._get_connection()
         cursor = conn.cursor()
-        
+
         try:
+            should_return_inserted_id = self._should_return_inserted_id(query, fetchone, fetchall)
+            if should_return_inserted_id:
+                query = self._append_returning_id(query)
+
             cursor.execute(query, params)
+
+            if should_return_inserted_id:
+                row = cursor.fetchone()
+                conn.commit()
+                return row[0] if row else None
+
             conn.commit()
-            
+
             if fetchone:
                 return cursor.fetchone()
             elif fetchall:
@@ -108,7 +137,7 @@ class SQLiteDatabase(DatabaseInterface):
             conn.commit()
         except sqlite3.Error as e:
             conn.rollback()
-            raise DatabaseError("SQLite executescript error") from e
+            raise DatabaseError(f"SQLite executescript error: {e}") from e
         finally:
             conn.close()
 
