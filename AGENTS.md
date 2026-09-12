@@ -68,6 +68,16 @@ python database/apply_schema.py --database postgresql --connection-string "$env:
 
 # First admin
 python create_first_admin.py
+
+# Backups (SQLite)
+python scripts/backup_database.py
+
+# Schedule it (examples):
+# PythonAnywhere Scheduled Task (daily at 03:00 UTC):
+#   /home/<username>/.virtualenvs/<venv>/bin/python /home/<username>/<project>/scripts/backup_database.py
+#
+# Cron (Linux/VPS) — daily at 03:00:
+#   0 3 * * * /home/user/<project>/.venv/bin/python /home/user/<project>/scripts/backup_database.py >> /home/user/<project>/logs/backup_cron.log 2>&1
 ```
 
 ## Schema management
@@ -99,9 +109,12 @@ SQLite in production (low-cost deployments):
 relative path can be lost across deploys or worker restarts.
 - Enable WAL for concurrency: it is already set in `database/db_sqlite.py`
 (`PRAGMA journal_mode = WAL`). Do not disable it.
-- Backups are just file copies. Schedule periodic copies of the database file
-and the `-wal`/`-shm` siblings while the database is idle or use SQLite's
-`backup()` API.
+- Use `scripts/backup_database.py` for automated backups. It uses SQLite's
+online `backup()` API, so it produces a consistent snapshot without requiring
+the `-wal`/`-shm` siblings to be copied manually, and it works while the app
+is running. Configure `SQLITE_PATH`, `BACKUP_DIR`, and `BACKUP_RETENTION_DAYS`
+as needed. See the "Commands" section for scheduling examples on
+PythonAnywhere and cron.
 - For moderate write concurrency, keep transactions short. The bot uses one
 connection per request; long-running operations can block writers.
 - Schema changes must still be applied with `python database/apply_schema.py --database sqlite --db-path <path>`.
