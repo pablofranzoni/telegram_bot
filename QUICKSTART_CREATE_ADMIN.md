@@ -4,7 +4,7 @@
 
 Se ha implementado un script interactivo para crear el primer administrador del API JWT.
 
-**Script:** `create_first_admin.py`
+**Script:** `scripts/create_first_admin.py`
 
 ---
 
@@ -17,7 +17,7 @@ cd C:\Users\CPU\OneDrive\Documentos\python_projects\telegram_bot
 
 ### Paso 2: Ejecuta el script
 ```bash
-py create_first_admin.py
+py scripts/create_first_admin.py
 ```
 
 ### Paso 3: Sigue los prompts
@@ -197,5 +197,5 @@ Si algo no funciona:
 
 ---
 
-**¡Listo! Ahora puedes ejecutar `py create_first_admin.py` y crear tu primer admin.**
+**¡Listo! Ahora puedes ejecutar `py scripts/create_first_admin.py` y crear tu primer admin.**
 
