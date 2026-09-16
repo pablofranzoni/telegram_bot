@@ -9,7 +9,7 @@ import atexit
 import time
 import uuid
 
-from flask import Flask, jsonify, request, g
+from flask import Flask, jsonify, request, g, redirect, url_for
 from flask_jwt_extended import JWTManager
 from dotenv import load_dotenv
 from telegram.ext import Application
@@ -208,22 +208,28 @@ atexit.register(_shutdown_telegram_app)
 # ==================== ENDPOINTS FLASK ====================
 @app_flask.route('/')
 def index():
+    """Root route redirects based on client-side session token.
+
+    Since the JWT is stored in localStorage, the browser checks it via JS
+    and redirects to the upload page if present, or to the login page otherwise.
+    No system endpoints are exposed here.
+    """
     return '''
-        <html>
-            <head><title>Sistema Telegram Bot</title></head>
-            <body>
-                <h1>Sistema de Gestión Telegram Bot</h1>
-                <p>Endpoints disponibles:</p>
-                <ul>
-                    <li><a href="/api/upload">/api/upload</a> - Subir CSV (GET para formulario, POST para subir)</li>
-                    <li><a href="/api/uploads">/api/uploads</a> - Ver uploads realizados</li>
-                    <li><a href="/api/customers">/api/customers</a> - Listar clientes</li>
-                    <li><a href="/api/categories">/api/categories</a> - Listar categorias</li>
-                    <li><a href="/api/products">/api/products</a> - Listar productos</li>
-                    <li><a href="/api/stats">/api/stats</a> - Estadísticas</li>
-                </ul>
-                <p>Telegram Bot también está activo y usando la misma base de datos.</p>
-            </body>
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <title>Cargando...</title>
+        </head>
+        <body>
+            <script>
+                if (localStorage.getItem('access_token')) {
+                    window.location.href = '/api/upload';
+                } else {
+                    window.location.href = '/api/login-page';
+                }
+            </script>
+        </body>
         </html>
         '''
 

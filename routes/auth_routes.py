@@ -1,7 +1,7 @@
 # routes/auth_routes.py
 """REST API blueprint for authentication and token management."""
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, render_template
 from shared.services.jwt_service import JWTService
 from shared.services.user_service import UserService
 from utils.logger_factory import get_api_logger
@@ -9,6 +9,12 @@ from utils.logger_factory import get_api_logger
 logger = get_api_logger(__name__)
 
 auth_bp = Blueprint("auth", __name__)
+
+
+@auth_bp.route("/login-page", methods=["GET"])
+def login_page():
+    """Render the HTML login form."""
+    return render_template("login.html")
 
 
 @auth_bp.route("/auth/login", methods=["POST"])
