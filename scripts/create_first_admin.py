@@ -12,7 +12,7 @@ This script:
 7. Marks email as verified
 
 Usage:
-    py create_first_admin.py
+    py scripts/create_first_admin.py
 """
 
 import os
@@ -22,7 +22,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # Add project root to path
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
@@ -409,7 +409,6 @@ def main():
                     """,
                     (True, email)
                 )
-                db.commit()
                 print_success("Email verified successfully!")
                 break
             else:

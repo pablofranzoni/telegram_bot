@@ -19,7 +19,7 @@
 - **Response formatting for bot output.** Use `utils/formatters.py:TelegramTable(rows, headers=None)` for tabular results (categories, products, etc.). Build via `RowAdapterFactory.create(row, headers)` for sqlite3.Row / psycopg2 RealDictRow / plain tuples. Empty rows render as `<pre>Sin resultados</pre>`.
 - **Auth on `/api/*` routes** uses `@api_token_required` (JWT, `shared/decorators.py`) and optionally `@admin_required` (must come **after** `@api_token_required`). The login route is `/api/auth/login` (`routes/auth_routes.py`).
 - **MercadoPago** webhook is `/mercadopago-webhook/` (trailing slash — keep it). Return URLs are `/okpago`, `/failpago`, `/pendpago`. Signature validation lives in `utils/mpago.py:verificar_firma`.
-- **First admin:** `python create_first_admin.py` — interactive, requires DB reachable and no existing admin (`is_admin=1`) in `customers`. The script is blocked if any admin row already exists; the docs/AGENTS files mention a "first superadmin" but the only programmatic alternative is POST `/api/register` with an existing admin's JWT.
+- **First admin:** `python scripts/create_first_admin.py` — interactive, requires DB reachable and no existing admin (`is_admin=1`) in `customers`. The script is blocked if any admin row already exists; the docs/AGENTS files mention a "first superadmin" but the only programmatic alternative is POST `/api/register` with an existing admin's JWT.
 - **Logging is split into two streams.** `utils/logging_config.py:configure_logging()` creates two dedicated `RotatingFileHandler`s: `logs/bot.log` for Telegram activity and `logs/api.log` for Flask API activity. Both propagate to the console via the root logger. Use `utils/logger_factory.py:get_bot_logger(__name__)` in bot handlers and `get_api_logger(__name__)` in API routes; never use `logging.getLogger(__name__)` directly in new bot/API modules. Use `log_bot_event(logger, update, action)` for high-level bot events so `telegram_user_id` is captured.
 - **Log levels are independent.** `BOT_LOG_LEVEL` (default `DEBUG`) and `API_LOG_LEVEL` (default `INFO`) control each file. `LOG_LEVEL` still acts as a fallback for both. Rotation is size-based: `LOG_MAX_BYTES` (default 10 MB) and `LOG_BACKUP_COUNT` (default 5). Set `LOG_DIR` to change the output directory (default `./logs`).
 - **Never log sensitive data.** Do not log passwords, verification codes, JWT tokens, Telegram secret tokens, or raw payment payloads (headers, bodies). MercadoPago webhook logs only topic/resource_id/result.
@@ -67,7 +67,11 @@ python database/apply_schema.py --database postgresql --connection-string "$env:
 # Add new incremental migrations under database/schema/<db_type>/NNN_description.sql.
 
 # First admin
-python create_first_admin.py
+python scripts/create_first_admin.py
+
+# Generate sample import catalog (Excel)
+python scripts/generate_catalogo_importacion.py
+python scripts/generate_catalogo_importacion.py --db-path ./data.db --output ./catalogo.xlsx
 
 # Backups (SQLite)
 python scripts/backup_database.py
@@ -155,7 +159,7 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 
 ## Endpoint map (for verification)
 
-- `GET /` — landing HTML (links to `/api/*` resources)
+- `GET /` — minimal JS page that redirects to `/api/upload` if a JWT token exists in `localStorage`, otherwise to `/api/login-page`
 - `GET /health`, `GET /health_db` — health probes
 - `POST /webhook/<TELEGRAM_WEBHOOK_PATH_TOKEN>` — Telegram updates
 - `POST /mercadopago-webhook/` — MP notifications (note trailing slash)

@@ -84,7 +84,8 @@ def app() -> Flask:
     from database.db_manager import db_manager
     from shared.services.email_service import EmailService
 
-    app = Flask(__name__, template_folder='templates', static_folder='static')
+    template_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+    app = Flask(__name__, template_folder=template_dir, static_folder='static')
     app.config['TESTING'] = True
     app.config['JWT_SECRET_KEY'] = 'test-secret-key'
     app.config['JWT_ALGORITHM'] = 'HS256'
@@ -120,6 +121,25 @@ def app() -> Flask:
     app.register_blueprint(customers_bp, url_prefix='/api')
     app.register_blueprint(invoices_bp, url_prefix='/api')
     app.register_blueprint(csv_bp, url_prefix='/api')
+
+    @app.route('/')
+    def test_root_index():
+        """Mirror production root behavior for tests."""
+        return '''
+            <!DOCTYPE html>
+            <html lang="es">
+            <head><meta charset="UTF-8"><title>Cargando...</title></head>
+            <body>
+                <script>
+                    if (localStorage.getItem('access_token')) {
+                        window.location.href = '/api/upload';
+                    } else {
+                        window.location.href = '/api/login-page';
+                    }
+                </script>
+            </body>
+            </html>
+            '''
 
     yield app
 
@@ -165,7 +185,15 @@ def _build_persistent_db(conn: sqlite3.Connection):
 
                 # Queries with RETURNING must be read before commit.
                 has_returning = 'RETURNING' in query.upper()
-                if has_returning and not fetchone and not fetchall:
+                if has_returning:
+                    if fetchone:
+                        row = cur.fetchone()
+                        self._conn.commit()
+                        return row
+                    if fetchall:
+                        rows = cur.fetchall()
+                        self._conn.commit()
+                        return rows
                     row = cur.fetchone()
                     self._conn.commit()
                     return row[0] if row else None
