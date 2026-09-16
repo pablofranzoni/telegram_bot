@@ -88,7 +88,8 @@ def create_product(
     if new_id is None:
         return None
 
-    create_inventory_row_db(new_id, stock_inicial)
+    if not create_inventory_row_db(new_id, stock_inicial):
+        return None
 
     return ProductDTO(
         id=new_id,

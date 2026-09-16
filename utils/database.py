@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from typing import Any
 
 from database.db import DatabaseError
@@ -7,6 +8,20 @@ from shared.record_utils import get_record_value
 from utils.uuid_utils import uuidv7
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_text(text: str) -> str:
+    """Return lower-case, stripped, accent-free text for fuzzy matching.
+
+    Useful for comparing names that may differ only in accents or
+    diacritics (e.g. 'Suspension' vs 'Suspensión').
+    """
+    if text is None:
+        return ""
+    text = str(text).strip().lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return text
 
 
 def _invoice_param_type(invoice_id):
@@ -164,6 +179,59 @@ def obtener_producto_por_id(product_id):
     
     except DatabaseError as e:
         logger.error("Error al obtener producto por ID %s: %s", product_id, e)
+        return None
+
+
+def get_product_by_name_db(name: str) -> dict | None:
+    """Returns a single product by normalized name, or None.
+
+    First tries an exact case-insensitive match; if that fails, falls back
+    to an accent-insensitive comparison so that 'Suspension' matches
+    'Suspensión'.
+    """
+    try:
+        db = get_db()
+        product = _execute_db(
+            db,
+            '''
+            SELECT p.id, p.nombre, p.descripcion, p.precio, p.disponible,
+                   p.category_id,
+                   COALESCE(pi.stock_disponible, 0) AS stock_available,
+                   pi.ultima_compra AS last_purchase_date,
+                   pi.ubicacion_almacen AS warehouse_location
+            FROM products p
+            LEFT JOIN product_inventory pi ON pi.product_id = p.id
+            WHERE LOWER(TRIM(p.nombre)) = LOWER(TRIM(?))
+            ''',
+            (name,),
+            fetchone=True,
+            param_types=['text'],
+        )
+        if product is not None:
+            return product
+
+        target = _normalize_text(name)
+        if not target:
+            return None
+        rows = _execute_db(
+            db,
+            '''
+            SELECT p.id, p.nombre, p.descripcion, p.precio, p.disponible,
+                   p.category_id,
+                   COALESCE(pi.stock_disponible, 0) AS stock_available,
+                   pi.ultima_compra AS last_purchase_date,
+                   pi.ubicacion_almacen AS warehouse_location
+            FROM products p
+            LEFT JOIN product_inventory pi ON pi.product_id = p.id
+            ''',
+            fetchall=True,
+        )
+        for row in rows or []:
+            if _normalize_text(get_record_value(row, "nombre")) == target:
+                return row
+        return None
+    except DatabaseError as e:
+        logger.error("Error al obtener producto por nombre: %s", e)
         return None
 
 
@@ -820,7 +888,11 @@ def create_product_db(nombre: str, descripcion: str, precio: float, category_id:
 
 
 def create_inventory_row_db(product_id: int, stock_inicial: int = 0) -> bool:
-    """Inserts an inventory row for a newly created product."""
+    """Inserts an inventory row for a newly created product.
+
+    If the row already exists (e.g. during a re-import), the insert is
+    ignored and the function still returns True, making callers idempotent.
+    """
     try:
         db = get_db()
         _execute_db(
@@ -828,14 +900,20 @@ def create_inventory_row_db(product_id: int, stock_inicial: int = 0) -> bool:
             '''
             INSERT INTO product_inventory (product_id, stock_actual, stock_reservado, stock_minimo)
             VALUES (?, ?, 0, 0)
-            RETURNING product_id
+            ON CONFLICT (product_id) DO NOTHING
             ''',
             (product_id, stock_inicial),
             param_types=['integer', 'integer'],
         )
         return True
     except DatabaseError as e:
-        logger.error("Error al crear fila de inventario para producto %s: %s", product_id, e)
+        cause = getattr(e, '__cause__', None)
+        logger.error(
+            "Error al crear fila de inventario para producto %s: %s (causa: %s)",
+            product_id,
+            e,
+            cause,
+        )
         return False
 
 
@@ -1198,6 +1276,46 @@ def get_category_by_id_db(category_id: int) -> dict | None:
         )
     except DatabaseError as e:
         logger.error("Error al obtener categoría %s: %s", category_id, e)
+        return None
+
+
+def get_category_by_name_db(name: str) -> dict | None:
+    """Returns a single category by normalized name, or None.
+
+    First tries an exact case-insensitive match; if that fails, falls back
+    to an accent-insensitive comparison so that 'Suspension' matches
+    'Suspensión'.
+    """
+    try:
+        db = get_db()
+        category = _execute_db(
+            db,
+            """
+            SELECT id, codigo, nombre, descripcion, parent_id
+            FROM categories
+            WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+            """,
+            (name,),
+            fetchone=True,
+            param_types=['text'],
+        )
+        if category is not None:
+            return category
+
+        target = _normalize_text(name)
+        if not target:
+            return None
+        rows = _execute_db(
+            db,
+            "SELECT id, codigo, nombre, descripcion, parent_id FROM categories",
+            fetchall=True,
+        )
+        for row in rows or []:
+            if _normalize_text(get_record_value(row, "nombre")) == target:
+                return row
+        return None
+    except DatabaseError as e:
+        logger.error("Error al obtener categoría por nombre: %s", e)
         return None
 
 
