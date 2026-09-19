@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() if csrf_token else '' }}">
+    <title>{% block title %}Dashboard{% endblock %}</title>
+
+    <!-- Tabler CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta20/dist/css/tabler.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta20/dist/css/tabler-vendors.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="layout-fluid">
+    <div class="page">
+        <!-- Sidebar -->
+        <aside class="navbar navbar-vertical navbar-expand-sm navbar-light">
+            <div class="container-fluid">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#sidebar-menu" aria-controls="sidebar-menu" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <h1 class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
+                    <a href="#">
+                        <span class="navbar-brand-image">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-shopping-bag" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                                <path d="M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-8.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z"/>
+                                <path d="M9 11v-3a3 3 0 0 1 6 0v3"/>
+                            </svg>
+                        </span>
+                        <span class="brand-text">Mi Tienda</span>
+                    </a>
+                </h1>
+                <div class="collapse navbar-collapse" id="sidebar-menu">
+                    <ul class="navbar-nav pt-lg-3">
+                        <li class="nav-item {% if active_page == 'dashboard' %}active{% endif %}">
+                            <a class="nav-link" href="#">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-layout-dashboard"></i>
+                                </span>
+                                <span class="nav-link-title">Dashboard</span>
+                            </a>
+                        </li>
+                        <li class="nav-item {% if active_page == 'upload' %}active{% endif %}">
+                            <a class="nav-link" href="{{ url_for('csv.upload_form') }}">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-file-upload"></i>
+                                </span>
+                                <span class="nav-link-title">Cargar Excel</span>
+                            </a>
+                        </li>
+                        <li class="nav-item {% if active_page == 'sales' %}active{% endif %}">
+                            <a class="nav-link" href="#">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-cash-register"></i>
+                                </span>
+                                <span class="nav-link-title">Ventas</span>
+                                <span class="badge bg-yellow-lt ms-auto">Próx.</span>
+                            </a>
+                        </li>
+                        <li class="nav-item {% if active_page == 'products' %}active{% endif %}">
+                            <a class="nav-link" href="#">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-package"></i>
+                                </span>
+                                <span class="nav-link-title">Productos</span>
+                                <span class="badge bg-yellow-lt ms-auto">Próx.</span>
+                            </a>
+                        </li>
+                        <li class="nav-item {% if active_page == 'categories' %}active{% endif %}">
+                            <a class="nav-link" href="#">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-tags"></i>
+                                </span>
+                                <span class="nav-link-title">Categorías</span>
+                                <span class="badge bg-yellow-lt ms-auto">Próx.</span>
+                            </a>
+                        </li>
+                        <li class="nav-item {% if active_page == 'customers' %}active{% endif %}">
+                            <a class="nav-link" href="#">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-users"></i>
+                                </span>
+                                <span class="nav-link-title">Clientes</span>
+                                <span class="badge bg-yellow-lt ms-auto">Próx.</span>
+                            </a>
+                        </li>
+                        <li class="nav-item {% if active_page == 'settings' %}active{% endif %}">
+                            <a class="nav-link" href="#">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <i class="ti ti-settings"></i>
+                                </span>
+                                <span class="nav-link-title">Configuración</span>
+                                <span class="badge bg-yellow-lt ms-auto">Próx.</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main wrapper -->
+        <div class="page-wrapper">
+            <!-- Top navbar -->
+            <header class="navbar navbar-expand-md navbar-light d-none d-lg-flex d-print-none">
+                <div class="container-xl">
+                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu" aria-controls="navbar-menu" aria-expanded="false" aria-label="Toggle navigation">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+                    <div class="navbar-nav flex-row order-md-last">
+                        <div class="nav-item d-none d-md-flex me-3">
+                            <div class="btn-list">
+                                <button type="button" class="nav-link px-0 theme-toggle" id="themeToggle" title="Cambiar tema">
+                                    <i class="ti ti-sun icon sun-icon"></i>
+                                    <i class="ti ti-moon icon moon-icon" style="display: none;"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="nav-item dropdown">
+                            <a href="#" class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown" aria-label="Open user menu">
+                                <span class="avatar avatar-sm bg-primary-lt">
+                                    <i class="ti ti-user"></i>
+                                </span>
+                                <div class="d-none d-xl-block ps-2">
+                                    <div>Administrador</div>
+                                    <div class="mt-1 small text-secondary">Panel de control</div>
+                                </div>
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+                                <a href="#" class="dropdown-item" id="logoutBtn">Cerrar sesión</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="collapse navbar-collapse" id="navbar-menu">
+                        <div>
+                            <h2 class="page-title">
+                                {% block page_title %}Dashboard{% endblock %}
+                            </h2>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page body -->
+            <div class="page-body">
+                <div class="container-xl">
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <footer class="footer footer-transparent d-print-none">
+                <div class="container-xl">
+                    <div class="row text-center align-items-center flex-row-reverse">
+                        <div class="col-lg-auto ms-lg-auto">
+                            <ul class="list-inline list-inline-dots mb-0">
+                                <li class="list-inline-item"><a href="#" class="link-secondary">Documentación</a></li>
+                                <li class="list-inline-item"><a href="#" class="link-secondary">Soporte</a></li>
+                            </ul>
+                        </div>
+                        <div class="col-12 col-lg-auto mt-3 mt-lg-0">
+                            <ul class="list-inline list-inline-dots mb-0">
+                                <li class="list-inline-item">
+                                    Copyright &copy; <span class="current-year">2026</span>.
+                                    Todos los derechos reservados.
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Tabler JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta20/dist/js/tabler.min.js"></script>
+
+    <!-- Dashboard common JS -->
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

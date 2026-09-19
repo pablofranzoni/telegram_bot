@@ -1,300 +1,238 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Importar datos desde Excel</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }
-        .container {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #333;
-            text-align: center;
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #666;
-            margin-bottom: 30px;
-        }
-        .section {
-            margin-bottom: 40px;
-            padding: 20px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-        }
-        .section h2 {
-            margin-top: 0;
-            color: #444;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
-            color: #555;
-        }
-        input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 2px dashed #ddd;
-            border-radius: 5px;
-            background: #f9f9f9;
-            box-sizing: border-box;
-        }
-        input[type="file"]:hover {
-            border-color: #4CAF50;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            width: 100%;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        button:disabled {
-            background-color: #cccccc;
-            cursor: not-allowed;
-        }
-        .requirements {
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-        }
-        .requirements h3 {
-            margin-top: 0;
-            color: #856404;
-        }
-        .requirements code {
-            background: #f8f9fa;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.95em;
-        }
-        #message {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 5px;
-            display: none;
-        }
-        .success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .info {
-            background-color: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-        .links {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-        }
-        .links a {
-            margin-right: 15px;
-        }
-        .page-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-            margin-bottom: 10px;
-        }
-        .page-header h1 {
-            margin: 0;
-            text-align: left;
-        }
-        .logout-btn {
-            width: auto;
-            background-color: #dc3545;
-            padding: 10px 20px;
-            font-size: 14px;
-        }
-        .logout-btn:hover {
-            background-color: #c82333;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="page-header">
-            <h1>📤 Importar datos desde Excel</h1>
-            <button type="button" id="logoutBtn" class="logout-btn">Cerrar sesión</button>
-        </div>
-        <p class="subtitle">Cargá categorías y productos desde archivos .xlsx</p>
+{% extends "base.html" %}
 
-        <!-- Cargar categorías -->
-        <div class="section">
-            <h2>📁 Cargar categorías</h2>
-            <div class="requirements">
-                <h3>📋 Requisitos:</h3>
-                <ul>
-                    <li>Formato: <strong>.xlsx</strong></li>
-                    <li>Hoja: <code>categories</code></li>
-                    <li>Columnas requeridas: <code>codigo</code>, <code>nombre</code>, <code>descripcion</code></li>
-                    <li>Columna opcional: <code>parent_name</code> (nombre de la categoría padre)</li>
-                    <li>Primera fila: debe contener los nombres de las columnas</li>
-                </ul>
+{% set active_page = "upload" %}
+
+{% block title %}Cargar Excel{% endblock %}
+{% block page_title %}Cargar datos desde Excel{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="row g-2 align-items-center">
+        <div class="col">
+            <div class="page-pretitle">Importación</div>
+            <h2 class="page-title">Cargar datos desde Excel</h2>
+        </div>
+    </div>
+</div>
+
+<div class="row row-cards">
+    <!-- Categories card -->
+    <div class="col-lg-6">
+        <div class="card upload-card h-100" data-endpoint="/api/load_categories">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <span class="me-2 text-green">
+                        <i class="ti ti-category"></i>
+                    </span>
+                    Cargar categorías
+                </h3>
             </div>
-            <form class="upload-form" data-endpoint="/api/load_categories">
-                <div class="form-group">
-                    <label>Seleccionar archivo Excel:</label>
-                    <input type="file" name="file" accept=".xlsx" required>
-                </div>
-                <button type="submit">Importar categorías</button>
-            </form>
-        </div>
+            <div class="card-body">
+                <p class="text-secondary">
+                    Subí un archivo Excel con la hoja <code>categories</code> y las columnas
+                    <code>codigo</code>, <code>nombre</code>, <code>descripcion</code>.
+                    Opcionalmente podés incluir <code>parent_name</code>.
+                </p>
 
-        <!-- Cargar productos -->
-        <div class="section">
-            <h2>🛒 Cargar productos</h2>
-            <div class="requirements">
-                <h3>📋 Requisitos:</h3>
-                <ul>
-                    <li>Formato: <strong>.xlsx</strong></li>
-                    <li>Hoja: <code>products</code></li>
-                    <li>Columnas requeridas: <code>nombre</code>, <code>descripcion</code>, <code>precio</code>, <code>category_name</code></li>
-                    <li>Columna opcional: <code>stock_inicial</code></li>
-                    <li>La categoría referenciada en <code>category_name</code> debe existir</li>
-                    <li>Primera fila: debe contener los nombres de las columnas</li>
-                </ul>
+                <div class="drop-zone" id="dropZoneCategories">
+                    <input type="file" class="drop-zone-input" name="file" accept=".xlsx" required>
+                    <div class="drop-zone-content">
+                        <div class="drop-zone-icon mb-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                                <path d="M14 3v4a1 1 0 0 0 1 1h4"/>
+                                <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/>
+                                <path d="M12 11v6"/>
+                                <path d="M9.5 13.5l2.5 -2.5l2.5 2.5"/>
+                            </svg>
+                        </div>
+                        <h4>Arrastrá tu archivo aquí</h4>
+                        <p class="text-secondary">
+                            o <span class="text-primary fw-bold">elegí un archivo</span> de tu computadora
+                        </p>
+                        <div class="text-muted small mt-2">
+                            Formatos soportados: <strong>.xlsx</strong> · Tamaño máximo: <strong>50 MB</strong>
+                        </div>
+                    </div>
+                    <div class="drop-zone-file" style="display: none;">
+                        <div class="drop-zone-file-icon">
+                            <i class="ti ti-file-spreadsheet text-green"></i>
+                        </div>
+                        <div class="drop-zone-file-info">
+                            <div class="file-name fw-bold"></div>
+                            <div class="file-size text-muted small"></div>
+                        </div>
+                        <button type="button" class="btn btn-ghost-danger btn-icon remove-file" title="Quitar archivo">
+                            <i class="ti ti-x"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-primary w-100 upload-submit">
+                        <i class="ti ti-upload me-2"></i>
+                        Importar categorías
+                    </button>
+                </div>
             </div>
-            <form class="upload-form" data-endpoint="/api/load_products">
-                <div class="form-group">
-                    <label>Seleccionar archivo Excel:</label>
-                    <input type="file" name="file" accept=".xlsx" required>
-                </div>
-                <button type="submit">Importar productos</button>
-            </form>
-        </div>
-
-        <div id="message"></div>
-
-        <div class="links">
-            <h3>📊 Acciones adicionales:</h3>
-            <p>
-                <a href="{{ url_for('csv.list_uploads') }}">📁 Ver archivos subidos</a>
-                <a href="{{ url_for('categories.list_categories') }}">🏷️ Ver categorías</a>
-                <a href="{{ url_for('products.list_products') }}">🛍️ Ver productos</a>
-            </p>
         </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const token = localStorage.getItem('access_token');
-            if (!token) {
-                window.location.href = '/api/login-page';
-                return;
-            }
+    <!-- Products card -->
+    <div class="col-lg-6">
+        <div class="card upload-card h-100" data-endpoint="/api/load_products">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <span class="me-2 text-azure">
+                        <i class="ti ti-package"></i>
+                    </span>
+                    Cargar productos
+                </h3>
+            </div>
+            <div class="card-body">
+                <p class="text-secondary">
+                    Subí un archivo Excel con la hoja <code>products</code> y las columnas
+                    <code>nombre</code>, <code>descripcion</code>, <code>precio</code>,
+                    <code>category_name</code>. Opcionalmente <code>stock_inicial</code>.
+                </p>
 
-            const messageDiv = document.getElementById('message');
+                <div class="drop-zone" id="dropZoneProducts">
+                    <input type="file" class="drop-zone-input" name="file" accept=".xlsx" required>
+                    <div class="drop-zone-content">
+                        <div class="drop-zone-icon mb-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                                <path d="M14 3v4a1 1 0 0 0 1 1h4"/>
+                                <path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/>
+                                <path d="M12 11v6"/>
+                                <path d="M9.5 13.5l2.5 -2.5l2.5 2.5"/>
+                            </svg>
+                        </div>
+                        <h4>Arrastrá tu archivo aquí</h4>
+                        <p class="text-secondary">
+                            o <span class="text-primary fw-bold">elegí un archivo</span> de tu computadora
+                        </p>
+                        <div class="text-muted small mt-2">
+                            Formatos soportados: <strong>.xlsx</strong> · Tamaño máximo: <strong>50 MB</strong>
+                        </div>
+                    </div>
+                    <div class="drop-zone-file" style="display: none;">
+                        <div class="drop-zone-file-icon">
+                            <i class="ti ti-file-spreadsheet text-azure"></i>
+                        </div>
+                        <div class="drop-zone-file-info">
+                            <div class="file-name fw-bold"></div>
+                            <div class="file-size text-muted small"></div>
+                        </div>
+                        <button type="button" class="btn btn-ghost-danger btn-icon remove-file" title="Quitar archivo">
+                            <i class="ti ti-x"></i>
+                        </button>
+                    </div>
+                </div>
 
-            function showMessage(text, type) {
-                messageDiv.innerHTML = text;
-                messageDiv.className = type;
-                messageDiv.style.display = 'block';
-                setTimeout(() => {
-                    messageDiv.style.display = 'none';
-                }, 10000);
-            }
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-primary w-100 upload-submit">
+                        <i class="ti ti-upload me-2"></i>
+                        Importar productos
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-            document.getElementById('logoutBtn').addEventListener('click', function() {
-                localStorage.removeItem('access_token');
-                window.location.href = '/api/login-page';
-            });
+<!-- Progress panel -->
+<div class="row mt-4" id="progressPanel" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-auto">
+                        <span class="avatar avatar-lg bg-success-lt">
+                            <i class="ti ti-file-type-xls text-success"></i>
+                        </span>
+                    </div>
+                    <div class="col">
+                        <h3 class="card-title mb-1">Procesando archivo Excel</h3>
+                        <div class="text-secondary small mb-2" id="progressFileName">-</div>
+                        <div class="progress mb-3">
+                            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                        </div>
+                        <div class="processing-steps">
+                            <div class="processing-step" data-step="1">
+                                <span class="step-icon"><i class="ti ti-loader"></i></span>
+                                <span class="step-text">Leyendo archivo</span>
+                            </div>
+                            <div class="processing-step" data-step="2">
+                                <span class="step-icon"><i class="ti ti-loader"></i></span>
+                                <span class="step-text">Mapeando campos</span>
+                            </div>
+                            <div class="processing-step" data-step="3">
+                                <span class="step-icon"><i class="ti ti-loader"></i></span>
+                                <span class="step-text">Validando datos</span>
+                            </div>
+                            <div class="processing-step" data-step="4">
+                                <span class="step-icon"><i class="ti ti-loader"></i></span>
+                                <span class="step-text">Guardando registros</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-            document.querySelectorAll('.upload-form').forEach(form => {
-                form.addEventListener('submit', async function(e) {
-                    e.preventDefault();
+<!-- Result alert -->
+<div class="row mt-4" id="resultPanel" style="display: none;">
+    <div class="col-12">
+        <div class="alert" id="resultAlert" role="alert">
+            <h4 class="alert-title" id="resultTitle"></h4>
+            <div class="text-secondary" id="resultMessage"></div>
+        </div>
+    </div>
+</div>
 
-                    const endpoint = form.getAttribute('data-endpoint');
-                    const fileInput = form.querySelector('input[type="file"]');
-                    const file = fileInput.files[0];
-                    const submitBtn = form.querySelector('button');
+<!-- Recent uploads -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Últimas importaciones</h3>
+                <div class="card-actions">
+                    <button type="button" class="btn btn-ghost-secondary btn-icon" id="refreshUploads" title="Actualizar">
+                        <i class="ti ti-refresh"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-vcenter card-table" id="uploadsTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Archivo</th>
+                                <th>Fecha</th>
+                                <th>Procesadas</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="empty-row">
+                                <td colspan="5" class="text-center text-secondary py-4">
+                                    <i class="ti ti-inbox me-2"></i>
+                                    No hay importaciones recientes
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-                    if (!file) {
-                        showMessage('Por favor seleccioná un archivo', 'error');
-                        return;
-                    }
-
-                    if (!file.name.toLowerCase().endsWith('.xlsx')) {
-                        showMessage('Solo se permiten archivos Excel (.xlsx)', 'error');
-                        return;
-                    }
-
-                    const formData = new FormData();
-                    formData.append('file', file);
-
-                    submitBtn.disabled = true;
-                    submitBtn.textContent = 'Importando...';
-
-                    try {
-                        const response = await fetch(endpoint, {
-                            method: 'POST',
-                            headers: {
-                                'Authorization': `Bearer ${token}`
-                            },
-                            body: formData,
-                        });
-
-                        const result = await response.json();
-
-                        if (response.ok) {
-                            showMessage(
-                                `✅ ${result.message}<br>` +
-                                `📊 Procesados: ${result.processed_rows}<br>` +
-                                `➕ Creados: ${result.created}<br>` +
-                                `🔄 Actualizados: ${result.updated}<br>` +
-                                `❌ Errores: ${result.errors}<br>` +
-                                `🔗 ID de upload: ${result.upload_id}`,
-                                result.errors > 0 ? 'info' : 'success'
-                            );
-                            form.reset();
-                        } else {
-                            showMessage(`❌ Error: ${result.error || 'Error desconocido'}`, 'error');
-                        }
-                    } catch (error) {
-                        showMessage(`❌ Error de conexión: ${error.message}`, 'error');
-                    } finally {
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = submitBtn.textContent
-                            .replace('Importando...', 'Importar')
-                            .replace('...', '');
-                    }
-                });
-            });
-        });
-    </script>
-</body>
-</html>
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}

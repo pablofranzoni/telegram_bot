@@ -159,9 +159,11 @@ class TestLoginPageAndUploadAccess:
         assert response.status_code == 200
         assert "text/html" in response.content_type
         html = response.data.decode("utf-8")
-        assert "Importar datos desde Excel" in html
+        assert "Cargar datos desde Excel" in html
         assert "Cerrar sesión" in html
         assert "logoutBtn" in html
+        assert "load_categories" in html
+        assert "load_products" in html
 
     def test_root_redirects_to_login_when_no_token(self, client):
         response = client.get("/")
