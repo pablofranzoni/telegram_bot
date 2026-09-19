@@ -175,5 +175,9 @@ class PostgreSQLDatabase(DatabaseInterface):
             cursor.close()
             self._return_connection(conn)
 
+    def commit(self):
+        """No-op: PostgreSQL already commits on every execute()."""
+        pass
+
     def close_all_connections(self):
         self.connection_pool.closeall()

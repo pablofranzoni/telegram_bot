@@ -141,6 +141,10 @@ class SQLiteDatabase(DatabaseInterface):
         finally:
             conn.close()
 
+    def commit(self):
+        """No-op: SQLite already commits on every execute()."""
+        pass
+
     def close_all_connections(self):
         # SQLite no necesita cerrar conexiones pool
         pass

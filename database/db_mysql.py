@@ -124,6 +124,10 @@ class MySQLDatabase(DatabaseInterface):
             cursor.close()
             self._return_connection(conn)
 
+    def commit(self):
+        """No-op: MySQL already commits on every execute()."""
+        pass
+
     def close_all_connections(self):
         """Cerrar todas las conexiones"""
         for conn in self.connection_pool:

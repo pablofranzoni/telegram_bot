@@ -27,5 +27,14 @@ class DatabaseInterface(ABC):
         pass
     
     @abstractmethod
+    def commit(self):
+        """Commit any pending transaction.
+
+        Each concrete adapter manages its own connection lifecycle; for
+        adapters that already auto-commit on execute(), this can be a no-op.
+        """
+        pass
+
+    @abstractmethod
     def close_all_connections(self):
         pass
