@@ -4,9 +4,19 @@
 from flask import Blueprint, jsonify, request, render_template
 from shared.services.jwt_service import JWTService
 from shared.services.user_service import UserService
+from shared.services.rate_limit_service import LoginRateLimiter
+from utils.config import Config
 from utils.logger_factory import get_api_logger
 
 logger = get_api_logger(__name__)
+
+
+def _get_client_ip() -> str:
+    """Extract the real client IP, accounting for reverse proxies."""
+    forwarded = request.headers.get('X-Forwarded-For')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or ''
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -73,12 +83,26 @@ def login():
             "error_code": "MISSING_PASSWORD"
         }), 400
     
+    client_ip = _get_client_ip()
+    
+    # Check rate limit before attempting authentication
+    allowed, retry_after = LoginRateLimiter.is_allowed(client_ip, username)
+    if not allowed:
+        logger.warning(f"Login rate limit exceeded for user: {username} from IP: {client_ip}")
+        return jsonify({
+            "status": "error",
+            "message": "Too many login attempts. Please try again later.",
+            "error_code": "RATE_LIMIT_EXCEEDED",
+            "retry_after": retry_after
+        }), 429
+    
     try:
         # Authenticate user against database
         user = UserService.authenticate_user(username, password)
         
         if not user:
-            logger.warning(f"Failed login attempt for user: {username}")
+            LoginRateLimiter.record_attempt(client_ip, username, success=False)
+            logger.warning(f"Failed login attempt for user: {username} from IP: {client_ip}")
             return jsonify({
                 "status": "error",
                 "message": "Invalid username or password",
@@ -87,6 +111,7 @@ def login():
         
         # Check if user is admin (API users must have is_admin = 1)
         if user.get("is_admin") != 1:
+            LoginRateLimiter.record_attempt(client_ip, username, success=False)
             logger.warning(f"Non-admin user attempted login: {username}")
             return jsonify({
                 "status": "error",
@@ -96,6 +121,7 @@ def login():
         
         # Check if email is verified
         if not user.get("email_verified"):
+            LoginRateLimiter.record_attempt(client_ip, username, success=False)
             logger.warning(f"Unverified user attempted login: {username}")
             return jsonify({
                 "status": "error",
@@ -106,6 +132,7 @@ def login():
         # Generate tokens
         tokens = JWTService.generate_tokens(identity=username)
         
+        LoginRateLimiter.record_attempt(client_ip, username, success=True)
         logger.info(f"Successful login for API user: {username}")
         
         return jsonify({

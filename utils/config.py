@@ -61,3 +61,10 @@ class Config:
     # Product images directory (served by the `info_<id>` callback).
     # Files are looked up as `<id>.<ext>` for each supported extension.
     PRODUCT_IMAGES_DIR = os.getenv('PRODUCT_IMAGES_DIR', './productos_images')
+
+    # Login rate limiting
+    _truthy = {'1', 'true', 'yes', 'on'}
+    LOGIN_RATE_LIMIT_ENABLED = os.getenv('LOGIN_RATE_LIMIT_ENABLED', 'true').strip().lower() in _truthy
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS = int(os.getenv('LOGIN_RATE_LIMIT_MAX_ATTEMPTS', '5'))
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv('LOGIN_RATE_LIMIT_WINDOW_SECONDS', '300'))
+    LOGIN_RATE_LIMIT_LOCKOUT_SECONDS = int(os.getenv('LOGIN_RATE_LIMIT_LOCKOUT_SECONDS', '900'))

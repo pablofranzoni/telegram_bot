@@ -18,6 +18,7 @@
 - **SQL placeholders.** SQL written for SQLite uses `?`; `db_pgsql.py:_adapt_query` rewrites `?` to `%s` and strips `INSERT OR IGNORE`. Don't use psycopg2 `%`-formatting style by hand in new code — the adapter handles it.
 - **Response formatting for bot output.** Use `utils/formatters.py:TelegramTable(rows, headers=None)` for tabular results (categories, products, etc.). Build via `RowAdapterFactory.create(row, headers)` for sqlite3.Row / psycopg2 RealDictRow / plain tuples. Empty rows render as `<pre>Sin resultados</pre>`.
 - **Auth on `/api/*` routes** uses `@api_token_required` (JWT, `shared/decorators.py`) and optionally `@admin_required` (must come **after** `@api_token_required`). The login route is `/api/auth/login` (`routes/auth_routes.py`).
+- **Login rate limiting** is enforced in `routes/auth_routes.py` using `shared/services/rate_limit_service.py:LoginRateLimiter`. Failed attempts are recorded in the `login_attempts` table (shared DB backend, so it works across Gunicorn workers). Defaults: 5 failed attempts within a 5-minute window trigger a 15-minute lockout. Validation errors (400) do not count toward the limit.
 - **MercadoPago** webhook is `/mercadopago-webhook/` (trailing slash — keep it). Return URLs are `/okpago`, `/failpago`, `/pendpago`. Signature validation lives in `utils/mpago.py:verificar_firma`.
 - **First admin:** `python scripts/create_first_admin.py` — interactive, requires DB reachable and no existing admin (`is_admin=1`) in `customers`. The script is blocked if any admin row already exists; the docs/AGENTS files mention a "first superadmin" but the only programmatic alternative is POST `/api/register` with an existing admin's JWT.
 - **Logging is split into two streams.** `utils/logging_config.py:configure_logging()` creates two dedicated `RotatingFileHandler`s: `logs/bot.log` for Telegram activity and `logs/api.log` for Flask API activity. Both propagate to the console via the root logger. Use `utils/logger_factory.py:get_bot_logger(__name__)` in bot handlers and `get_api_logger(__name__)` in API routes; never use `logging.getLogger(__name__)` directly in new bot/API modules. Use `log_bot_event(logger, update, action)` for high-level bot events so `telegram_user_id` is captured.
@@ -147,6 +148,7 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 - `MP_ACCESS_TOKEN` — MercadoPago SDK init
 - `DEBUG_MODE` (truthy values: `1/true/yes/on`) and `LOG_LEVEL` (e.g. `INFO`, `DEBUG`)
 - `LOG_DIR` (default `./logs`), `BOT_LOG_LEVEL` (default `DEBUG`), `API_LOG_LEVEL` (default `INFO`), `LOG_MAX_BYTES` (default `10485760`), `LOG_BACKUP_COUNT` (default `5`)
+- `LOGIN_RATE_LIMIT_ENABLED` (default `true`), `LOGIN_RATE_LIMIT_MAX_ATTEMPTS` (default `5`), `LOGIN_RATE_LIMIT_WINDOW_SECONDS` (default `300`), `LOGIN_RATE_LIMIT_LOCKOUT_SECONDS` (default `900`)
 - For PythonAnywhere: `PYTHONANYWHERE_DOMAIN` triggers `bootstrap_webhook_runtime()` on WSGI import (so PTB initializes once per worker, not per request)
 
 ## Test layout
@@ -165,6 +167,7 @@ Used at import time in `utils/config.py` and `bot_pa.py`:
 - `POST /mercadopago-webhook/` — MP notifications (note trailing slash)
 - `GET|POST /<estado>` — payment return URLs (`okpago`, `failpago`, `pendpago`)
 - `/api/...` — blueprints: `auth`, `admin`, `csv`, `products`, `categories`, `customers`, `invoices` (all require JWT except `auth/login`, `auth/refresh`, and registration/password-reset flows)
+  - `POST /api/auth/login` — JWT login; rate limited per IP + username (429 on excess)
   - `GET /api/products/<id>/stock` — current inventory (JWT)
   - `POST /api/products/<id>/stock` — add stock, admin only (JWT + admin)
 

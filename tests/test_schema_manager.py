@@ -115,6 +115,8 @@ def test_apply_mode_applies_base_schema():
 
 def test_apply_mode_is_idempotent():
     """Ejecutar apply dos veces no falla ni duplica registros."""
+    import os
+
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     db = _InMemoryDB(conn)
@@ -126,7 +128,10 @@ def test_apply_mode_is_idempotent():
         "SELECT COUNT(*) AS total FROM schema_migrations",
         fetchone=True,
     )
-    assert count["total"] == 5
+    # El total debe coincidir con la cantidad de archivos .sql del schema de SQLite.
+    schema_dir = os.path.join(os.path.dirname(__file__), '..', 'database', 'schema', 'sqlite')
+    expected = len([f for f in os.listdir(schema_dir) if f.endswith('.sql')])
+    assert count["total"] == expected
 
 
 def test_verify_mode_passes_when_fully_migrated():
