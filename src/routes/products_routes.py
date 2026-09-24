@@ -24,6 +24,9 @@ def _product_to_dict(dto) -> dict:
         "stock_available": dto.stock_available,
         "ultima_compra": dto.last_purchase_date,
         "ubicacion_almacen": dto.warehouse_location,
+        "category_id": dto.category_id,
+        "category_name": dto.category_name,
+        "disponible": dto.disponible,
     }
 
 

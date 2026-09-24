@@ -26,3 +26,6 @@ class ProductDTO:
     stock_available: int | None = None
     last_purchase_date: str | None = None
     warehouse_location: str | None = None
+    category_id: int | None = None
+    category_name: str | None = None
+    disponible: bool = True

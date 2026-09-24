@@ -170,8 +170,10 @@ def obtener_producto_por_id(product_id):
                        p.category_id,
                        COALESCE(pi.stock_disponible, 0) AS stock_available,
                        pi.ultima_compra AS last_purchase_date,
-                       pi.ubicacion_almacen AS warehouse_location
+                       pi.ubicacion_almacen AS warehouse_location,
+                       c.nombre AS category_name
                 FROM products p
+                LEFT JOIN categories c ON p.category_id = c.id
                 LEFT JOIN product_inventory pi ON pi.product_id = p.id
                 WHERE p.id = ?
             ''', (product_id,), fetchone=True, param_types=['integer'])

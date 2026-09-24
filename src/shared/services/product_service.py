@@ -30,6 +30,9 @@ def _row_to_dto(row: dict) -> ProductDTO:
         stock_available=int(get_record_value(row, "stock_available", fallback_index=7) or 0),
         last_purchase_date=get_record_value(row, "last_purchase_date", fallback_index=8),
         warehouse_location=get_record_value(row, "warehouse_location", fallback_index=9),
+        category_id=int(get_record_value(row, "category_id", fallback_index=4)) if get_record_value(row, "category_id", fallback_index=4) is not None else None,
+        category_name=str(get_record_value(row, "category_name", fallback_index=10) or ""),
+        disponible=bool(get_record_value(row, "disponible", fallback_index=5)) if get_record_value(row, "disponible", fallback_index=5) is not None else True,
     )
 
 
@@ -65,6 +68,9 @@ def get_product(product_id: int) -> ProductDTO | None:
         stock_available=int(get_record_value(row, "stock_available", fallback_index=7) or 0),
         last_purchase_date=get_record_value(row, "last_purchase_date", fallback_index=8),
         warehouse_location=get_record_value(row, "warehouse_location", fallback_index=9),
+        category_id=int(get_record_value(row, "category_id", fallback_index=4)) if get_record_value(row, "category_id", fallback_index=4) is not None else None,
+        category_name=str(get_record_value(row, "category_name", fallback_index=10) or ""),
+        disponible=bool(get_record_value(row, "disponible", fallback_index=5)) if get_record_value(row, "disponible", fallback_index=5) is not None else True,
     )
 
 
@@ -91,13 +97,7 @@ def create_product(
     if not create_inventory_row_db(new_id, stock_inicial):
         return None
 
-    return ProductDTO(
-        id=new_id,
-        name=nombre,
-        description=descripcion,
-        price=to_decimal(precio),
-        stock_available=stock_inicial,
-    )
+    return get_product(new_id)
 
 
 def update_product(product_id: int, data: dict) -> ProductDTO | None:
