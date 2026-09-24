@@ -67,17 +67,13 @@ class SQLiteDatabase(DatabaseInterface):
             cursor.close()
             conn.close()
     
-    def _should_return_inserted_id(self, query: str, fetchone: bool, fetchall: bool) -> bool:
-        """Return whether an INSERT should fetch and return the generated key."""
+    def _should_return_lastrowid(self, query: str, fetchone: bool, fetchall: bool) -> bool:
+        """Return whether an INSERT should return cursor.lastrowid."""
         if fetchone or fetchall:
             return False
         if 'RETURNING' in query.upper():
             return False
         return self._INSERT_RETURNING_REGEX.match(query) is not None
-
-    def _append_returning_id(self, query: str) -> str:
-        """Append RETURNING id to INSERT statements needing the inserted key."""
-        return f"{query.rstrip().rstrip(';')} RETURNING id"
 
     def execute(self, query, params=(), fetchone=False, fetchall=False, param_types=None) -> Any | list[Any] | int | None:
         """Ejecutar consulta simple"""
@@ -87,23 +83,15 @@ class SQLiteDatabase(DatabaseInterface):
         cursor = conn.cursor()
 
         try:
-            should_return_inserted_id = self._should_return_inserted_id(query, fetchone, fetchall)
-            if should_return_inserted_id:
-                query = self._append_returning_id(query)
-
             cursor.execute(query, params)
-
-            if should_return_inserted_id:
-                row = cursor.fetchone()
-                conn.commit()
-                return row[0] if row else None
-
             conn.commit()
 
             if fetchone:
                 return cursor.fetchone()
             elif fetchall:
                 return cursor.fetchall()
+            elif self._should_return_lastrowid(query, fetchone, fetchall):
+                return cursor.lastrowid
             else:
                 return cursor.lastrowid
         except sqlite3.Error as e:

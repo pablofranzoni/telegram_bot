@@ -1328,14 +1328,13 @@ def create_category_db(
     """Inserts a new category and returns its new id, or None on failure."""
     try:
         db = get_db()
-        row = _execute_db(
+        new_id = _execute_db(
             db,
-            'INSERT INTO categories (codigo, nombre, descripcion, parent_id) VALUES (?, ?, ?, ?) RETURNING id',
+            'INSERT INTO categories (codigo, nombre, descripcion, parent_id) VALUES (?, ?, ?, ?)',
             (codigo, nombre, descripcion, parent_id),
-            fetchone=True,
             param_types=['text', 'text', 'text', 'integer'],
         )
-        return int(row['id']) if row else None
+        return int(new_id) if new_id is not None else None
     except DatabaseError as e:
         logger.error("Error al crear categoría '%s': %s", nombre, e)
         return None
