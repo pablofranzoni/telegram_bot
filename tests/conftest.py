@@ -97,7 +97,7 @@ def app() -> Flask:
     db_manager._db = None
 
     # Load clean schema into a long-lived in-memory connection
-    schema_dir = os.path.join(os.path.dirname(__file__), '..', 'database', 'schema', 'sqlite')
+    schema_dir = os.path.join(os.path.dirname(__file__), '..', 'src', 'database', 'schema', 'sqlite')
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
     for filename in sorted(os.listdir(schema_dir)):

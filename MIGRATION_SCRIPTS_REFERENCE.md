@@ -333,8 +333,8 @@ curl http://localhost:5000/api/auth/login -X POST \
 - `migrations/README.md` - Comprehensive migration guide
 - `QUICK_START_MIGRATION.md` - Quick reference
 - `AGENTS.md` - Project overview
-- `shared/services/user_service.py` - User service implementation
-- `routes/admin_routes.py` - API endpoints
+- `src/shared/services/user_service.py` - User service implementation
+- `src/routes/admin_routes.py` - API endpoints
 
 ---
 

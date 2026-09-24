@@ -110,8 +110,8 @@ db.commit()
 
 | Archivo | Estado | Cambios |
 |---------|--------|---------|
-| `shared/services/email_service.py` | ✅ COMPLETADO | `send_email()`, refactorizado, wrappers |
-| `shared/services/__init__.py` | ✅ COMPLETADO | Exports de `send_password_reset_email` |
+| `src/shared/services/email_service.py` | ✅ COMPLETADO | `send_email()`, refactorizado, wrappers |
+| `src/shared/services/__init__.py` | ✅ COMPLETADO | Exports de `send_password_reset_email` |
 | `create_first_admin.py` | ✅ COMPLETADO | Imports corregidos, validación de BD |
 | `tests/test_email_service.py` | ✅ COMPLETADO | 13 tests, todos pasando |
 | `EMAIL_SERVICE_IMPLEMENTATION.md` | ✅ COMPLETADO | Documentación fase 1 |
@@ -259,11 +259,11 @@ You can now use these credentials to:
 
 | Clase | Ubicación | Método | Uso |
 |-------|-----------|--------|-----|
-| `PasswordValidator` | `shared/services/user_service.py:27` | `validate()` | Validar contraseña |
-| `PasswordHasher` | `shared/services/user_service.py:116` | `hash_password()` | Hashear contraseña |
-| `EmailValidator` | `shared/services/user_service.py:95` | `validate()` | Validar email |
-| `UserService` | `shared/services/user_service.py:135` | Métodos varios | Operaciones de usuario |
-| `EmailService` | `shared/services/email_service.py:18` | `send_verification_email()` | Enviar email (mock) |
+| `PasswordValidator` | `src/shared/services/user_service.py:27` | `validate()` | Validar contraseña |
+| `PasswordHasher` | `src/shared/services/user_service.py:116` | `hash_password()` | Hashear contraseña |
+| `EmailValidator` | `src/shared/services/user_service.py:95` | `validate()` | Validar email |
+| `UserService` | `src/shared/services/user_service.py:135` | Métodos varios | Operaciones de usuario |
+| `EmailService` | `src/shared/services/email_service.py:18` | `send_verification_email()` | Enviar email (mock) |
 
 ---
 

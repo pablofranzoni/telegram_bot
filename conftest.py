@@ -1,6 +1,6 @@
-"""Root conftest.py — adds the project root to sys.path so all modules are importable."""
+"""Root conftest.py — adds src/ to sys.path so all modules are importable."""
 
 import sys
-import os
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))

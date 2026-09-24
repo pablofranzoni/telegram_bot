@@ -1,4 +1,5 @@
 import os
+import sys
 import asyncio
 import json
 import logging
@@ -8,6 +9,10 @@ import requests
 import atexit
 import time
 import uuid
+from pathlib import Path
+
+# Add src/ to path so project modules remain importable after src-layout refactor.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from flask import Flask, jsonify, request, g, redirect, url_for
 from flask_jwt_extended import JWTManager

@@ -1,5 +1,7 @@
 """Unit tests for auth_service."""
 
+import sqlite3
+
 from shared.services import auth_service
 
 
@@ -32,6 +34,21 @@ def test_get_customer_with_email_returns_customer_when_email_exists(monkeypatch)
     result = auth_service.get_customer_with_email(123)
 
     assert result == {"id": 123, "email": "ana@example.com"}
+
+
+def test_get_customer_with_email_works_with_sqlite_row(monkeypatch):
+    """Regression: obtener_cliente returns sqlite3.Row, which has no .get()."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE customers (id INTEGER, email TEXT)")
+    conn.execute("INSERT INTO customers VALUES (?, ?)", (123, "ana@example.com"))
+    row = conn.execute("SELECT * FROM customers").fetchone()
+
+    monkeypatch.setattr(auth_service, "obtener_cliente", lambda telegram_id: row)
+
+    result = auth_service.get_customer_with_email(123)
+
+    assert result == row
 
 
 def test_get_customer_with_email_returns_none_when_email_is_missing(monkeypatch):

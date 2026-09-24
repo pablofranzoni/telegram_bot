@@ -187,5 +187,5 @@ idx_customers_email_verification_code -- Búsquedas de código de verificación
 
 Para más información sobre los cambios, ver:
 - `AGENTS.md` - Descripción del proyecto y arquitectura
-- `shared/services/user_service.py` - Lógica de usuarios
-- `routes/admin_routes.py` - Endpoints de administración
+- `src/shared/services/user_service.py` - Lógica de usuarios
+- `src/routes/admin_routes.py` - Endpoints de administración

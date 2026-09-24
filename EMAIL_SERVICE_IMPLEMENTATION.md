@@ -8,7 +8,7 @@ Se implementó exitosamente un sistema de email mock para desarrollo y testing l
 
 ## 📋 Cambios Realizados
 
-### 1. **Extendido `shared/services/email_service.py`**
+### 1. **Extendido `src/shared/services/email_service.py`**
 
 #### Nuevo método: `send_email()`
 ```python
@@ -125,7 +125,7 @@ Expires in: 15 minutes
 
 ---
 
-### 3. **Actualizado `shared/services/__init__.py`**
+### 3. **Actualizado `src/shared/services/__init__.py`**
 
 - ✅ Agregada exportación de `send_password_reset_email`
 - ✅ Ahora exporta los 3 métodos email:
@@ -284,8 +284,8 @@ Email Verified: Yes
 
 | Archivo | Cambio | Estado |
 |---------|--------|--------|
-| `shared/services/email_service.py` | Agregado `send_email()`, refactorizado métodos, funciones wrapper | ✅ Completado |
-| `shared/services/__init__.py` | Agregada exportación de `send_password_reset_email` | ✅ Completado |
+| `src/shared/services/email_service.py` | Agregado `send_email()`, refactorizado métodos, funciones wrapper | ✅ Completado |
+| `src/shared/services/__init__.py` | Agregada exportación de `send_password_reset_email` | ✅ Completado |
 | `create_first_admin.py` | **NUEVO** - Script interactivo | ✅ Creado |
 | `tests/test_email_service.py` | Reescrito con 13 tests para mock | ✅ Completado (13/13 passed) |
 
@@ -306,14 +306,14 @@ Email Verified: Yes
 ## 🔗 Referencias en el Código
 
 **`send_email()` usado en:**
-- `utils/mpago.py:370` - Envío de comprobantes
+- `src/utils/mpago.py:370` - Envío de comprobantes
 - `create_first_admin.py` - Script de creación (nuevo)
 
 **`send_verification_email()` usado en:**
-- `shared/services/user_service.py` - Solicitud de reset
-- `shared/handlers/auth.py:122` - Handlers del bot
+- `src/shared/services/user_service.py` - Solicitud de reset
+- `src/shared/handlers/auth.py:122` - Handlers del bot
 - `create_first_admin.py` - Script de creación (nuevo)
 
 **`send_password_reset_email()` usado en:**
-- `shared/services/user_service.py:533` - Reset de contraseña
+- `src/shared/services/user_service.py:533` - Reset de contraseña
 

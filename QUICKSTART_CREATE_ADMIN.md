@@ -171,7 +171,7 @@ Todos los endpoints que requieren `@admin_required` ahora funcionan con tu JWT
 Para más detalles, ver:
 - `FINAL_IMPLEMENTATION_SUMMARY.md` - Documentación completa
 - `EMAIL_SERVICE_IMPLEMENTATION.md` - Sistema de email
-- `shared/services/user_service.py` - Lógica de usuarios
+- `src/shared/services/user_service.py` - Lógica de usuarios
 
 ---
 

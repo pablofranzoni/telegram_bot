@@ -7,7 +7,7 @@ Se ha implementado autorización JWT para los endpoints GET del catálogo de pro
 
 ### 1. Endpoints Modificados
 
-#### `routes/products_routes.py`
+#### `src/routes/products_routes.py`
 - **GET /api/products** - Ahora requiere `@api_token_required`
   - Antes: Público (sin autenticación)
   - Ahora: Requiere JWT válido
@@ -142,7 +142,7 @@ Status: 404
 El bot de Telegram **NO es afectado** porque:
 - No consume el endpoint HTTP `/api/products`
 - Accede directamente a la BD a través de funciones internas
-- Ejemplo: `list_products_by_category_page()` en `shared/handlers/products.py`
+- Ejemplo: `list_products_by_category_page()` en `src/shared/handlers/products.py`
 
 ### ⚠️ Impacto en Clientes Externos
 - Clientes que consumen el endpoint REST necesitan:
@@ -196,7 +196,7 @@ TestDeleteProduct (3 tests)
 
 ## Archivos Modificados
 
-1. **routes/products_routes.py** (2 cambios)
+1. **src/routes/products_routes.py** (2 cambios)
    - Línea 29: Agregado `@api_token_required` a `GET /api/products`
    - Línea 59: Agregado `@api_token_required` a `GET /api/products/<id>`
 

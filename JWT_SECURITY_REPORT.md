@@ -20,7 +20,7 @@ PyJWT==2.13.0
 ---
 
 #### 2. JWT Configuration
-**File:** `utils/config.py` (Lines 46-49)
+**File:** `src/utils/config.py` (Lines 46-49)
 
 ```python
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
@@ -32,7 +32,7 @@ JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', '2592000'
 ---
 
 #### 3. JWT Decorators
-**File:** `shared/decorators.py`
+**File:** `src/shared/decorators.py`
 
 Created `@api_token_required` decorator for protecting endpoints:
 - Validates Authorization header format (Bearer <token>)
@@ -51,7 +51,7 @@ def create_product():
 ---
 
 #### 4. JWT Service
-**File:** `shared/services/jwt_service.py`
+**File:** `src/shared/services/jwt_service.py`
 
 Provides token generation and management:
 - `generate_access_token()` - Create access tokens
@@ -66,7 +66,7 @@ tokens = JWTService.generate_tokens(identity='user@example.com')
 ---
 
 #### 5. Authentication Endpoints
-**File:** `routes/auth_routes.py`
+**File:** `src/routes/auth_routes.py`
 
 New public endpoint for obtaining tokens:
 
@@ -96,27 +96,27 @@ Response (200):
 
 All write operations (POST, PUT, DELETE) are now protected with JWT:
 
-**Products API** (`routes/products_routes.py`)
+**Products API** (`src/routes/products_routes.py`)
 - ✅ POST `/api/products` - Create product (Protected)
 - ✅ PUT `/api/products/<id>` - Update product (Protected)
 - ✅ DELETE `/api/products/<id>` - Delete product (Protected)
 - ✅ GET `/api/products` - List products (Protected - Requires JWT)
 - ✅ GET `/api/products/<id>` - Get product (Protected - Requires JWT)
 
-**Categories API** (`routes/categories_routes.py`)
+**Categories API** (`src/routes/categories_routes.py`)
 - ✅ POST `/api/categories` - Create category (Protected)
 - ✅ PUT `/api/categories/<id>` - Update category (Protected)
 - ✅ DELETE `/api/categories/<id>` - Delete category (Protected)
 - ❌ GET `/api/categories` - List categories (Public)
 - ❌ GET `/api/categories/<id>` - Get category (Public)
 
-**Invoices API** (`routes/invoices_routes.py`)
+**Invoices API** (`src/routes/invoices_routes.py`)
 - ✅ GET `/api/invoices` - List invoices (Protected)
 - ✅ GET `/api/invoices/<id>` - Get invoice (Protected)
 - ✅ GET `/api/invoices/<id>/items` - Get invoice items (Protected)
 - ✅ GET `/api/invoices/by-customer/<telegram_id>` - Get customer invoices (Protected)
 
-**CSV API** (`routes/csv_routes.py`)
+**CSV API** (`src/routes/csv_routes.py`)
 - ✅ POST `/api/upload` - Upload CSV (Protected)
 - ✅ GET `/api/uploads` - List uploads (Protected)
 - ✅ GET `/api/customers` - List customers (Protected)
@@ -320,18 +320,18 @@ tests/test_invoices_api.py ......................... 19 passed
 ## Files Modified/Created
 
 ### New Files
-- `shared/decorators.py` - JWT decorator
-- `shared/services/jwt_service.py` - Token generation service
-- `routes/auth_routes.py` - Authentication endpoints
+- `src/shared/decorators.py` - JWT decorator
+- `src/shared/services/jwt_service.py` - Token generation service
+- `src/routes/auth_routes.py` - Authentication endpoints
 - `tests/test_auth_api.py` - Authentication tests
 
 ### Modified Files
-- `utils/config.py` - Added JWT configuration
+- `src/utils/config.py` - Added JWT configuration
 - `bot_pa.py` - Initialized JWTManager
-- `routes/products_routes.py` - Added @api_token_required
-- `routes/categories_routes.py` - Added @api_token_required
-- `routes/invoices_routes.py` - Added @api_token_required
-- `routes/csv_routes.py` - Added @api_token_required
+- `src/routes/products_routes.py` - Added @api_token_required
+- `src/routes/categories_routes.py` - Added @api_token_required
+- `src/routes/invoices_routes.py` - Added @api_token_required
+- `src/routes/csv_routes.py` - Added @api_token_required
 - `tests/conftest.py` - Added JWT fixtures
 - `tests/test_products_api.py` - Added security tests
 - `tests/test_categories_api.py` - Added security tests

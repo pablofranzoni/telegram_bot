@@ -120,4 +120,4 @@ psql -U username -d database_name -f migrations/rollback_postgresql.sql
 For detailed information, see:
 - `migrations/README.md` - Complete migration guide
 - `AGENTS.md` - Project overview
-- `shared/services/user_service.py` - User service implementation
+- `src/shared/services/user_service.py` - User service implementation

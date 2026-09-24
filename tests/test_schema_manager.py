@@ -129,7 +129,7 @@ def test_apply_mode_is_idempotent():
         fetchone=True,
     )
     # El total debe coincidir con la cantidad de archivos .sql del schema de SQLite.
-    schema_dir = os.path.join(os.path.dirname(__file__), '..', 'database', 'schema', 'sqlite')
+    schema_dir = os.path.join(os.path.dirname(__file__), '..', 'src', 'database', 'schema', 'sqlite')
     expected = len([f for f in os.listdir(schema_dir) if f.endswith('.sql')])
     assert count["total"] == expected
 
