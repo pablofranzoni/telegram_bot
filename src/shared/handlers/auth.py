@@ -56,7 +56,7 @@ async def cmd_inicio_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Buscar si ya tiene email
     datos_cliente = get_customer_with_email(telegram_id)
 
-    if datos_cliente and datos_cliente.get('email'):
+    if datos_cliente:
         # Ya tiene email, mostrar menú principal
         await mostrar_menu_principal(update, context, usuario.first_name)
         return ConversationHandler.END
@@ -84,7 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Buscar si ya tiene email
     datos_cliente = get_customer_with_email(telegram_id)
 
-    if datos_cliente and datos_cliente.get('email'):
+    if datos_cliente:
         # Ya tiene email, mostrar menú principal
         await mostrar_menu_principal(update, context, usuario.first_name)
         return ConversationHandler.END

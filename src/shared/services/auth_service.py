@@ -4,6 +4,7 @@ import random
 import re
 import string
 
+from shared.record_utils import get_record_value
 from utils.database import guardar_cliente, obtener_cliente
 
 
@@ -24,7 +25,7 @@ def generate_verification_code() -> str:
 def get_customer_with_email(telegram_id: int):
     """Return the customer record only when it has a valid email."""
     customer = obtener_cliente(telegram_id)
-    if customer and customer.get("email"):
+    if customer and get_record_value(customer, "email"):
         return customer
     return None
 
